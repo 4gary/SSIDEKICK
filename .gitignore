@@ -1,0 +1,29 @@
+# Secrets
+elevenlabs_key.txt
+.env
+
+# Gary's memory and personal stream data
+memory.json
+features_data.json
+logs/
+recaps/
+*.log
+
+# Voices and voice previews (big binaries)
+voices/*
+!voices/PUT_PIPER_VOICES_HERE
+voice_previews/
+
+# Backups
+backup*/
+*_backup/
+*.bak
+*.v[0-9]
+*.v[0-9][0-9]
+*.before_*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------
+#  Gary's extra features. Edit this file, then restart start.bat.
+#  (Kept separate from config.toml so updates never overwrite your main settings.)
+#  Games page / OBS overlay:  http://localhost:7777/games      Buttons:  http://localhost:7777/games/control
+# ---------------------------------------------------------------
+
+[voice_effects]
+# Gary runs your Streamer.bot voice-effect actions. They must be in the "Sidekick" action group.
+# Say "Gary, robot voice me" or "Gary, give me the helium voice". "Gary, random voice" picks one.
+enabled = true
+keywords = ["robot", "helium", "deep", "echo", "alien"]   # matched against the action names
+on_his_own = true            # now and then Gary secretly puts one on you and announces it
+own_min_minutes = 20         # never sooner than this after the last effect
+own_chance = 0.04            # chance per 30 seconds once that time has passed (0.04 = about every 12 more minutes)
+effect_seconds = 10          # how long your Streamer.bot effects last, so Gary can say so
+
+[effects]
+# Other Streamer.bot actions in the "Sidekick" group whose names start with "FX" (not voices): "Gary, acid trip me",
+# "Gary, make me drunk". Gary matches words from the action's name, plus these aliases.
+enabled = true
+prefix = "FX"
+seconds = { acid = 30, drunk = 30, "turn off" = 30 }       # how long they last, so Gary can say so
+aliases = { acid = ["acid", "trip", "tripping", "lsd", "shrooms"], drunk = ["drunk", "wasted", "hammered"], "turn off" = ["signal lost", "fake end", "kill the stream"] }
+
+[regulars]
+enabled = true
+regular_after_days = 3       # someone who has chatted on this many different days counts as a regular
+greet_new = true             # also say a quick welcome to first-time chatters
+welcome_back_days = 14       # "long time no see" if they've been away this long
+greet_gap_seconds = 40       # at most one greeting this often (people arriving together get greeted together)
+first_chatter_shoutout = true
+
+[events]
+# Raids, subs, gifts, cheers and follows come straight from Streamer.bot, nothing to set up.
+enabled = true
+follows = true               # set false if follows get spammy
+shoutout_keyword = "shout"   # if a Sidekick action has this in its name, Gary runs it for raiders (with %sidekickUser%)
+
+[polls]
+seconds = 90                 # how long a poll stays open
+trivia_seconds = 30          # time to answer each trivia question
+trivia_rounds = 3
+predict_seconds = 120        # predictions lock after this long (then you say who/what won)
+chat_messages = true         # Gary also posts polls/questions/results in chat through Streamer.bot
+
+[race]
+# Marble races. Gary hypes the start, commentates mid-race (with vision on), calls the winner and roasts last place.
+predictions = true           # chat can "!pick <name>" before each race; right picks earn points
+glance_after_seconds = 25    # with vision on, Gary looks at the race this long after the start and calls it
+start_on_scene = ""          # e.g. "marble": switching to a scene with this in its name starts a race (blank = off)
+winner_chat_pattern = ""     # optional regex with a (?P<winner>...) group, for a game bot that posts the winner in chat
+
+[clips]
+keyword = "clip"             # "Gary, clip that" runs the Sidekick action with this in its name
+
+[quiet]
+# "Gary, hold that thought" stops him mid-line. "Gary, stop talking for 5 minutes" / "be quiet for 10 minutes" mutes him.
+# "Gary, be quiet" with no time = until you say "Gary, you can talk again". "Gary, go ahead" finishes a line you cut off.
+# "Gary, go away for 10 minutes" = muted, but he stays on screen doing idle stuff. While muted he ignores chat and
+# your mic; saying his name to him ("Gary, what do you think?") brings him back early.
+listen_while_talking = true  # hear you while he talks, so you can cut him off (only those commands count). false if he hears himself
+default_minutes = 0          # "be quiet" with no time: 0 = until you call him back
+max_minutes = 60
+say_back = true              # he says he's back when the time is up
+alerts_while_muted = true    # follows, subs, gifts, bits and raids still get a thank-you while he's muted
+away_activities = ["nap", "couch", "dj", "arcade", "phone", "lieback"]   # what he does on screen when you send him away
+
+[roles]
+# When OBS switches to a scene whose name contains the key, Gary plays this role until you switch away.
+news = "You are the co-anchor of DUMSTREAM News 9, a ridiculous local news broadcast. Talk like a TV news anchor: deliver what's happening on stream and in chat as breaking news headlines, toss to 'our correspondent' in chat, and react to dum's reports with fake-serious journalism."
+weather = "You are the weatherman of DUMSTREAM Weather, powered by the Doppler 9000. Turn whatever is happening on stream and in chat into an over-the-top weather forecast: chance of dum, scattered gravity, light drizzle of bits, fog of war. Point at the map, give advisories."
+
+[vision]
+# Gary glances at the stream now and then and reacts to the game. Needs a model with vision loaded in
+# LM Studio (Gemma 4 can see images) and OBS's WebSocket server on (OBS: Tools -> WebSocket Server Settings).
+enabled = true
+model = ""                   # blank = the model already loaded. Or a separate vision model's name in LM Studio
+glance_minutes = 4           # look at the screen this often
+comment_chance = 0.35        # chance he says something about what he saw (otherwise it's just context)
+
+[obs]
+url = ""                     # blank = read from OBS's settings (usually ws://127.0.0.1:4455)
+password = ""                # blank = read from OBS's settings automatically

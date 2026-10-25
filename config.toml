@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------
+#  Stream Sidekick config. Edit this file, then restart start.bat
+# ---------------------------------------------------------------
+
+[bot]
+name = "Gary"                 # what chat and you call it. Short, easy names work best for voice.
+aliases = ["garry", "gerry"]  # other spellings that count as its name (speech-to-text often mishears names)
+streamer_name = "dum"         # what it calls you
+persona = """
+You are Gary, a playful, quick-witted co-host on a live stream. You sit in the corner of the screen as a little avatar.
+You hang out with the streamer and their chat like a friend who's also on the stream.
+You tease the streamer lightly, hype up chatters, and react to what's going on right now. You know the community's running jokes and love a good callback.
+When someone asks a real question, actually answer it with real substance, a specific opinion, or a fun fact, in 2-3 spoken sentences. For quick banter, 1-2 sentences is plenty.
+Have opinions, be specific, and avoid generic filler like "that's interesting" or "let's keep the show going". No emojis, no hashtags, no stage directions, no lists.
+Never say you are an AI language model. Keep it PG-13 and friendly. Never repeat yourself.
+"""
+
+[llm]
+# LM Studio: Developer tab -> Start Server. Default address below.
+base_url = "http://localhost:1234/v1"
+model = "google/gemma-4-e4b"  # fast. "qwen3.6-35b-a3b" = more substance but ~2x slower. Leave blank to use whatever model is loaded in LM Studio
+temperature = 0.85
+max_tokens = 300
+no_think = true               # adds /no_think for Qwen3 so it answers fast instead of "thinking"
+
+[chat]
+# "streamerbot" = read chat through Streamer.bot (Twitch, YouTube, Kick, whatever it's connected to)
+# "twitch"      = read Twitch chat directly (no login needed, read-only)
+# "none"        = no chat, only the control page / mic
+source = "streamerbot"
+twitch_channel = "your_channel_name"   # only used when source = "twitch"
+ignore_users = ["nightbot", "streamelements", "streamlabs", "moobot", "fossabot", "wizebot"]
+
+[behavior]
+reply_chance = 0.15           # chance to react to a normal chat message (0 to 1)
+min_gap_seconds = 6           # never talk more often than this
+chat_cooldown_seconds = 60    # wait at least this long between unprompted chat reactions
+idle_seconds = 0              # if nothing happened for this long, make a comment (0 = off)
+interject_chance = 0.25       # chance to chime in on something you say on the mic without saying his name
+interject_cooldown_seconds = 45   # at least this long between unprompted chime-ins
+history_lines = 30            # how much recent chat/conversation it remembers
+
+[streamerbot]
+# Streamer.bot: Servers/Clients -> WebSocket Server -> enable, Auto Start. Default 127.0.0.1:8080
+url = "ws://127.0.0.1:8080/"
+password = ""                 # only if you turned on authentication in Streamer.bot
+action_group = "Sidekick"     # ONLY actions in this group can be run by the sidekick
+chat_can_run_actions = false  # true = viewers saying "Byte, <do thing>" can trigger actions too (careful!)
+
+[tts]
+# "windows" = built-in Windows voices, zero setup
+# "piper"   = much nicer free local voices (see README)
+# "elevenlabs" = best quality, cloud. Falls back to the Windows voice if it fails.
+#               Put your API key in elevenlabs_key.txt next to sidekick.py, NOT in this file.
+engine = "elevenlabs"
+windows_voice = ""            # part of a voice name, e.g. "Zira" or "David". Blank = default
+windows_rate = 185            # words per minute
+piper_exe = "piper"           # path to piper.exe, or "piper" if installed with pip
+piper_model = "voices/en_US-amy-medium.onnx"
+elevenlabs_voice = "wV72erjJSh7ty3IyXRsf"  # "shelly on the rocks" (was dracula: B5EgjuFKToC74OjIRgef) (voice name or voice_id from your ElevenLabs account)
+elevenlabs_model = "eleven_flash_v2_5"
+elevenlabs_stability = 0.4
+elevenlabs_similarity = 0.8
+elevenlabs_style = 0.3
+
+[listen]
+# Optional: hear YOU through your mic (speech-to-text runs locally with faster-whisper).
+# Install extras first:  pip install faster-whisper sounddevice
+enabled = true
+wake_word_only = true         # only reply when you say the bot's name. Everything else is just context.
+whisper_model = "small.en"    # tiny.en (fastest), base.en, small.en (most accurate)
+device = ""                   # mic name or index. Blank = Windows default mic
+energy_threshold = 0.015      # raise if it triggers on background noise, lower if it misses you
+
+[memory]
+# Logs every line to logs/YYYY-MM-DD.jsonl and remembers facts + stream summaries in memory.json.
+# memory.json is plain text: open it to see (or fix/delete) what the bot remembers.
+enabled = true
+learn_every_lines = 25        # mine new facts after this many lines (only while the bot is idle)
+facts_per_person = 8          # how many facts about each person go into a reply
+past_streams = 3              # how many past stream summaries it remembers
+
+[server]
+port = 7777                   # overlay: http://localhost:7777   control panel: http://localhost:7777/control

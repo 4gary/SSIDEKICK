@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sidekick Overlay</title>
+<style>
+  :root { --face: #7c5cff; --face-dark: #5a3fd6; --screen: #151229; --glow: #54f0c8; --bubble: #ffffff; --ink: #1b1630; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
+  #stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 8px; }
+  #bubble {
+    max-width: 92%; margin-bottom: 10px; padding: 10px 14px; border-radius: 16px; background: var(--bubble); color: var(--ink);
+    font-size: 19px; font-weight: 600; line-height: 1.25; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    opacity: 0; transform: translateY(8px) scale(.96); transition: opacity .2s, transform .2s; position: relative;
+  }
+  #bubble.show { opacity: 1; transform: none; }
+  #bubble::after { content: ""; position: absolute; left: 50%; bottom: -9px; margin-left: -9px; border: 9px solid transparent; border-bottom: 0; border-top-color: var(--bubble); }
+  #avatar { width: 220px; height: 220px; transform-origin: 50% 100%; }
+  #avatar svg, #avatar img { width: 100%; height: 100%; display: block; }
+  #png { display: none; position: relative; }
+  #png img { position: absolute; inset: 0; object-fit: contain; }
+  .dots circle { animation: dot 1s infinite; opacity: .2; }
+  .dots circle:nth-child(2) { animation-delay: .15s; } .dots circle:nth-child(3) { animation-delay: .3s; }
+  @keyframes dot { 50% { opacity: 1; } }
+  #unlock { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); padding: 6px 10px; border-radius: 8px;
+    background: #000c; color: #fff; font-size: 13px; cursor: pointer; display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bubble"></div>
+  <div id="avatar">
+    <svg id="svg" viewBox="0 0 200 200">
+      <!-- antenna -->
+      <line x1="100" y1="34" x2="100" y2="14" stroke="var(--face-dark)" stroke-width="5" stroke-linecap="round"/>
+      <circle id="bulb" cx="100" cy="12" r="8" fill="var(--glow)"/>
+      <!-- head -->
+      <rect x="22" y="34" width="156" height="142" rx="46" fill="var(--face)"/>
+      <rect x="22" y="150" width="156" height="26" rx="13" fill="var(--face-dark)" opacity=".5"/>
+      <rect x="40" y="54" width="120" height="100" rx="32" fill="var(--screen)"/>
+      <!-- eyes -->
+      <g id="eyes" fill="var(--glow)">
+        <ellipse id="eyeL" cx="76" cy="92" rx="11" ry="14"/>
+        <ellipse id="eyeR" cx="124" cy="92" rx="11" ry="14"/>
+      </g>
+      <!-- cheeks -->
+      <circle cx="56" cy="122" r="7" fill="#ff7ab6" opacity=".55"/>
+      <circle cx="144" cy="122" r="7" fill="#ff7ab6" opacity=".55"/>
+      <!-- mouth -->
+      <ellipse id="mouth" cx="100" cy="128" rx="16" ry="2.5" fill="var(--glow)"/>
+      <g class="dots" id="dots" fill="var(--glow)" style="display:none">
+        <circle cx="86" cy="128" r="4"/><circle cx="100" cy="128" r="4"/><circle cx="114" cy="128" r="4"/>
+      </g>
+    </svg>
+    <div id="png"><img id="pngClosed"><img id="pngOpen" style="opacity:0"></div>
+  </div>
+</div>
+<div id="unlock">Click to enable sound (not needed inside OBS)</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const bubble = $("bubble"), mouth = $("mouth"), dots = $("dots"), avatar = $("avatar");
+let ws, ctx, analyser, source, level = 0, talking = false, thinking = false, hideTimer, usePng = false;
+
+function audioCtx() {
+  if (!ctx) {
+    ctx = new AudioContext();
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.connect(ctx.destination);
+  }
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  return ctx;
+}
+document.addEventListener("click", () => { audioCtx(); $("unlock").style.display = "none"; });
+
+function showBubble(text) {
+  clearTimeout(hideTimer);
+  bubble.textContent = text;
+  bubble.classList.add("show");
+}
+function hideBubble(delay = 1500) {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => bubble.classList.remove("show"), delay);
+}
+function setThinking(on) {
+  thinking = on;
+  dots.style.display = on && !usePng ? "" : "none";
+  mouth.style.display = on && !usePng ? "none" : "";
+}
+function stopAudio() {
+  if (source) { try { source.onended = null; source.stop(); } catch (e) {} source = null; }
+  talking = false;
+}
+function finished() {
+  stopAudio();
+  hideBubble();
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "done" }));
+}
+
+async function say(msg) {
+  setThinking(false);
+  stopAudio();
+  showBubble(msg.text);
+  if (!msg.audio) { setTimeout(finished, (msg.seconds || 3) * 1000); return; }
+  try {
+    const c = audioCtx();
+    if (c.state === "suspended") $("unlock").style.display = "block";
+    const buf = await (await fetch(msg.audio)).arrayBuffer();
+    const audio = await c.decodeAudioData(buf);
+    source = c.createBufferSource();
+    source.buffer = audio;
+    source.connect(analyser);
+    source.onended = finished;
+    talking = true;
+    source.start();
+  } catch (e) {
+    console.error(e);
+    setTimeout(finished, (msg.seconds || 3) * 1000);
+  }
+}
+
+// mouth follows the loudness of the voice
+const data = new Float32Array(512);
+function frame(t) {
+  let target = 0;
+  if (talking && analyser) {
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0; for (const v of data) sum += v * v;
+    target = Math.min(1, Math.sqrt(sum / data.length) * 6);
+  }
+  level += (target - level) * (target > level ? 0.6 : 0.25);
+  if (usePng) {
+    $("pngOpen").style.opacity = level > 0.18 ? 1 : 0;
+  } else {
+    mouth.setAttribute("ry", 2.5 + level * 16);
+    mouth.setAttribute("rx", 16 - level * 3);
+    $("bulb").setAttribute("opacity", 0.55 + 0.45 * Math.max(level, (Math.sin(t / 400) + 1) / 2 * (thinking ? 1 : 0.4)));
+  }
+  const bob = Math.sin(t / 700) * 3 + (talking ? Math.sin(t / 90) * level * 3 : 0);
+  avatar.style.transform = `translateY(${bob}px) scale(${1 + level * 0.03}, ${1 - level * 0.02})`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// blink now and then
+function blink() {
+  if (!usePng) {
+    for (const e of [$("eyeL"), $("eyeR")]) e.setAttribute("ry", 1.5);
+    setTimeout(() => { for (const e of [$("eyeL"), $("eyeR")]) e.setAttribute("ry", 14); }, 120);
+  }
+  setTimeout(blink, 2500 + Math.random() * 4000);
+}
+setTimeout(blink, 2000);
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => ws.send(JSON.stringify({ type: "hello", role: "overlay" }));
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "config") {
+      usePng = msg.png;
+      $("svg").style.display = usePng ? "none" : "";
+      $("png").style.display = usePng ? "block" : "none";
+      if (usePng) {
+        $("png").style.width = $("png").style.height = "100%";
+        $("pngClosed").src = "/static/avatar/closed.png";
+        $("pngOpen").src = "/static/avatar/open.png";
+      }
+    } else if (msg.type === "thinking") setThinking(true);
+    else if (msg.type === "say") say(msg);
+    else if (msg.type === "stop") finished();
+    else if (msg.type === "idle") setThinking(false);
+  };
+  ws.onclose = () => { setThinking(false); setTimeout(connect, 2000); };
+}
+connect();
+</script>
+</body>
+</html>

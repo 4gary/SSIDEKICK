@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidekick Control</title>
+<style>
+  :root { --bg: #0f0d1a; --panel: #1a1730; --line: #2e2950; --text: #ecebf5; --muted: #9b97b8; --accent: #7c5cff; --ok: #3ddc97; --bad: #ff6b81; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select { flex: 1; min-width: 120px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font: inherit; }
+  input.small { flex: 0 0 120px; }
+  select { flex: 0 0 140px; }
+  input[type=range] { flex: 0 0 160px; accent-color: var(--accent); background: none; border: 0; padding: 0; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  button.mode.active { background: var(--accent); border-color: var(--accent); }
+  .pill { padding: 3px 9px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  #log { height: 340px; overflow-y: auto; font: 12.5px/1.45 Consolas, monospace; white-space: pre-wrap; color: var(--muted); }
+  #log .say { color: var(--text); }
+  .acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+  .act { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .act span { flex: 1; } .act input { flex: 0 0 auto; min-width: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+  .act button { padding: 4px 9px; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="row"><h1>Sidekick control</h1><span style="flex:1"></span>
+    <button class="ghost" id="pause">Pause</button><button class="ghost" id="skip">Skip line</button><button class="ghost" id="refresh">Refresh</button></div>
+  <div class="card row" id="status"></div>
+  <div class="card">
+    <label>Talk to the sidekick as yourself (this can trigger Streamer.bot actions)</label>
+    <form class="row" id="fStreamer"><input id="streamer" placeholder="Gary, what do you think of this boss?" autocomplete="off"><button>Send</button></form>
+  </div>
+  <div class="card">
+    <label>Pretend to be a chatter (for testing)</label>
+    <form class="row" id="fChat"><input class="small" id="chatUser" value="testviewer"><input id="chat" placeholder="this game looks hard lol" autocomplete="off"><button>Send</button></form>
+  </div>
+  <div class="card">
+    <label>Make it react to an event, or say an exact line</label>
+    <form class="row" id="fEvent"><input id="event" placeholder="CoolDude42 just raided with 30 viewers" autocomplete="off"><button>React</button><button type="button" class="ghost" id="sayExact">Say exactly</button><button type="button" class="ghost" id="idleNow">Ask something</button></form>
+  </div>
+  <div class="card">
+    <label>Where the 3D sidekick goes (3D overlay only)</label>
+    <div class="row">
+      <button class="ghost mode" data-mode="stay">Stay put</button>
+      <button class="ghost mode" data-mode="wander">Wander nearby</button>
+      <button class="ghost mode" data-mode="roam">Free roam</button>
+      <button class="ghost mode" data-mode="walkon">Walk on to talk</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Stay put: stands still. Wander: paces around his spot. Free roam: walks the whole screen, near and far. Walk on: hidden until he has something to say.</div>
+    <div class="row" style="margin-top:10px">
+      <label style="display:flex;align-items:center;gap:8px;margin:0">Home spot <select id="home"><option value="-0.7">Left (-0.7)</option><option value="0">Center (0)</option><option value="0.7" selected>Right (0.7)</option></select></label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0">Size <input type="range" id="size" min="0.5" max="1.6" step="0.05" value="1"> <span id="sizeVal">1.0×</span></label>
+    </div>
+  </div>
+  <div class="card">
+    <label>What the 3D sidekick does on his own (3D overlay only)</label>
+    <div id="acts" class="acts"></div>
+    <div class="row" style="margin-top:10px">
+      <label style="display:flex;align-items:center;gap:8px;margin:0">How often <select id="actGap"><option value="2">Now and then</option><option value="1" selected>Normal</option><option value="0.5">A lot</option></select></label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0">Props <select id="actProps"><option value="use" selected>Only while he uses them</option><option value="always">Always out</option></select></label>
+      <button class="ghost" id="actStop">Stop what he's doing</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Tick what he's allowed to do when nobody is talking to him. "Do it" makes him do it right now. He drops anything the moment he has something to say. Props only show up while he walks over to use them. The DJ deck, couch, bed, arcade, desk and butterfly need Wander or Free roam.</div>
+  </div>
+  <div class="card"><label>Log</label><div id="log"></div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let ws;
+const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+function form(id, input, fn) { $(id).onsubmit = e => { e.preventDefault(); const v = $(input).value.trim(); if (v) { fn(v); $(input).value = ""; } }; }
+form("fStreamer", "streamer", t => send({ type: "streamer", text: t }));
+form("fChat", "chat", t => send({ type: "chat", user: $("chatUser").value, text: t }));
+form("fEvent", "event", t => send({ type: "event", text: t }));
+$("sayExact").onclick = () => { const v = $("event").value.trim(); if (v) { send({ type: "say", text: v }); $("event").value = ""; } };
+$("idleNow").onclick = () => send({ type: "idle_now" });
+$("pause").onclick = () => send({ type: "pause" });
+$("skip").onclick = () => send({ type: "skip" });
+$("refresh").onclick = () => send({ type: "refresh" });
+document.querySelectorAll("button.mode").forEach(b => b.onclick = () => { send({ type: "avatar", set: { mode: b.dataset.mode } }); applyAvatar({ mode: b.dataset.mode }); });
+$("home").onchange = () => send({ type: "avatar", set: { home: { x: Number($("home").value) } } });
+$("size").oninput = () => { $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; };
+$("size").onchange = () => send({ type: "avatar", set: { size: Number($("size").value) } });
+const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose, flick it"], ["armpit", "Sniff armpit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Chase a butterfly"],
+  ["stare", "Stare at the viewer"], ["phone", "Texting on his phone"], ["lieback", "Lie on his back"], ["dj", "DJ set"], ["couch", "Chill on the couch"], ["nap", "Nap in bed"], ["arcade", "Play arcade"], ["desk", "Sit at his desk"], ["desknap", "Doze off at the desk"]];
+const actState = { on: Object.fromEntries(ACTS.map(([k]) => [k, true])), gap: 1, props: "use" };
+$("acts").innerHTML = ACTS.map(([k, n]) => `<div class="act"><input type="checkbox" data-act="${k}" checked><span>${n}</span><button class="ghost" data-do="${k}">Do it</button></div>`).join("");
+const sendActs = () => send({ type: "avatar", set: { acts: actState } });
+document.querySelectorAll("[data-act]").forEach(c => c.onchange = () => { actState.on[c.dataset.act] = c.checked; sendActs(); });
+document.querySelectorAll("[data-do]").forEach(b => b.onclick = () => send({ type: "avatar", set: { do: { name: b.dataset.do, at: Date.now() } } }));
+$("actStop").onclick = () => send({ type: "avatar", set: { do: { name: "stop", at: Date.now() } } });
+$("actGap").onchange = () => { actState.gap = Number($("actGap").value); sendActs(); };
+$("actProps").onchange = () => { actState.props = $("actProps").value; sendActs(); };
+function applyAvatar(a) {
+  if (a.acts) {
+    Object.assign(actState.on, a.acts.on || {}); if (a.acts.gap) actState.gap = a.acts.gap; if (a.acts.props) actState.props = a.acts.props;
+    document.querySelectorAll("[data-act]").forEach(c => c.checked = actState.on[c.dataset.act] !== false);
+    $("actGap").value = String(actState.gap); $("actProps").value = actState.props;
+  }
+  if (a.mode !== undefined) document.querySelectorAll("button.mode").forEach(b => b.classList.toggle("active", b.dataset.mode === a.mode));
+  if (a.home) $("home").value = String(a.home.x);
+  if (a.size !== undefined) { $("size").value = a.size; $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; }
+}
+
+function pill(label, ok, text) { return `<span class="pill">${label}: <b class="${ok ? "ok" : "bad"}">${text}</b></span>`; }
+function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function addLog(line) {
+  const el = $("log"), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+  const d = document.createElement("div");
+  if (line.includes(" says: ")) d.className = "say";
+  d.innerHTML = esc(line);
+  el.appendChild(d);
+  while (el.childNodes.length > 400) el.removeChild(el.firstChild);
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => send({ type: "hello", role: "control" });
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "log") addLog(m.line);
+    if (m.type === "status") {
+      $("pause").textContent = m.paused ? "Resume" : "Pause";
+      $("status").innerHTML =
+        pill("LM Studio", m.lm.startsWith("LM Studio OK"), esc(m.lm.replace("LM Studio OK, using model: ", ""))) +
+        pill("Overlay", m.overlays > 0, m.overlays > 0 ? "connected" : "not open") +
+        (m.streamerbot === null ? "" : pill("Streamer.bot", m.streamerbot, m.streamerbot ? "connected" : "offline")) +
+        (m.streamerbot ? pill("Actions", m.actions.length > 0, m.actions.length ? esc(m.actions.join(", ")) : "none in group") : "") +
+        (m.paused ? pill("State", false, "paused") : "");
+    }
+    if (m.type === "status" && m.avatar) applyAvatar(m.avatar);
+    if (m.type === "avatar" && m.set) applyAvatar(m.set);
+  };
+  ws.onclose = () => setTimeout(connect, 2000);
+}
+connect();
+</script>
+</body>
+</html>
