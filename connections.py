@@ -50,7 +50,8 @@ async def twitch_chat(channel, on_chat):
 
 CHAT_EVENTS = {"Twitch": ["ChatMessage"], "YouTube": ["Message"], "Kick": ["ChatMessage"], "Trovo": ["ChatMessage"]}
 # other events passed to on_event (raids, subs... for features.py), subscribed one at a time
-OTHER_EVENTS = {"Twitch": ["Raid", "Sub", "ReSub", "GiftSub", "GiftBomb", "Cheer", "Follow"], "Obs": ["SceneChanged"]}
+OTHER_EVENTS = {"Twitch": ["Raid", "Sub", "ReSub", "GiftSub", "GiftBomb", "Cheer", "Follow", "RewardRedemption"],
+                "Obs": ["SceneChanged"]}
 
 
 def _parse_chat(data):

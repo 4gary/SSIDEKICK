@@ -65,6 +65,27 @@ say_back = true              # he says he's back when the time is up
 alerts_while_muted = true    # follows, subs, gifts, bits and raids still get a thank-you while he's muted
 away_activities = ["nap", "couch", "dj", "arcade", "phone", "lieback"]   # what he does on screen when you send him away
 
+[scene_modes]
+# OBS scene name -> 3D Gary's stream mode (first match wins, regex, case-insensitive). No match = normal.
+ending = '\b(ending|outro|end screen|that.?s the show|goodbye)\b'
+starting = '\b(starting|soon|intro)\b'
+brb = '\b(brb|be right back|break|away)\b'
+marble = 'marble'
+party = '\b(party|disco|dance)\b'
+chill = '\b(chill|lofi|cozy)\b'
+gaming = '\b(game|gaming|gameplay)\b'
+chatting = '\b(chat|chatting|camera|cam|talk)\b'
+
+[crowd]
+# Chat spam sets off 3D Gary: hype emotes/LETS GO -> hype party, a wave of F's -> rip.
+hype = true
+hype_messages = 6
+hype_people = 4
+rip = true
+rip_messages = 4
+window_seconds = 10
+cooldown_seconds = 120
+
 [roles]
 # When OBS switches to a scene whose name contains the key, Gary plays this role until you switch away.
 news = "You are the co-anchor of DUMSTREAM News 9, a ridiculous local news broadcast. Talk like a TV news anchor: deliver what's happening on stream and in chat as breaking news headlines, toss to 'our correspondent' in chat, and react to dum's reports with fake-serious journalism."

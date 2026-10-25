@@ -129,6 +129,8 @@ Say these on mic (with his name) or type them in the control page:
 He also does these on his own:
 - **Greets people** the first time they chat each day: regulars get a callback to something he remembers, first-timers a quick welcome, and the first chatter of the day a shoutout. At most one greeting every 40 s; people who arrive together get one line.
 - **Raids, subs, gift subs, cheers, follows** come straight from Streamer.bot (nothing to set up). Raids get the raider's history and size-matched hype, and if a Sidekick action has "shout" in its name he runs it for the raider.
+- **3D Gary reacts to events:** raids, subs, bits, follows and channel point redemptions also play a big animation on the 3D overlay. Chat spamming hype emotes (6 messages from 4+ people in 10 seconds) sets off a hype party, and a wave of F's sets off a "rip". You can do it yourself with "Gary, hype it up" or "Gary, rip" / "press F". Test any of them with `http://localhost:7777/api/do?name=raid&who=Bob&n=50` (names: raid, sub, bits, follow, hype, rip, redeem).
+- **Stream modes:** the OBS scene name sets Gary's mode on the 3D overlay (starting, brb, chatting, gaming, marble, chill, party, ending, else normal). Change the name patterns under `[scene_modes]` in features.toml.
 - **Green screen roles:** when OBS switches to a scene with "news" or "weather" in its name, he opens the segment as the DUMSTREAM News co-anchor or the Doppler 9000 weatherman, and stays in character until you switch away. Add more under `[roles]`.
 - **Screen glances:** every 4 minutes he looks at the stream (needs a model in LM Studio that can see images, plus OBS's WebSocket server, which Streamer.bot already uses). Mostly it's just context; sometimes he comments.
 

@@ -41,6 +41,13 @@ DEFAULTS = {
     "race": {"predictions": True, "pick_seconds": 45, "glance_after_seconds": 25, "start_on_scene": "",
              "winner_chat_pattern": ""},
     "clips": {"keyword": "clip"},
+    # OBS scene name (regex, lowercase) -> Gary's stream mode on the overlay. First match wins.
+    "scene_modes": {"ending": r"\b(ending|outro|end screen|that'?s the show|goodbye)\b", "starting": r"\b(starting|soon|intro)\b",
+                    "brb": r"\b(brb|be right back|break|away)\b", "marble": r"marble", "party": r"\b(party|disco|dance)\b",
+                    "chill": r"\b(chill|lofi|cozy)\b", "gaming": r"\b(game|gaming|gameplay)\b",
+                    "chatting": r"\b(chat|chatting|camera|cam|talk)\b"},
+    "crowd": {"hype": True, "hype_messages": 6, "hype_people": 4, "rip": True, "rip_messages": 4, "window_seconds": 10,
+              "cooldown_seconds": 120},
     "effects": {"enabled": True, "prefix": "FX", "seconds": {"acid": 30, "drunk": 30, "turn off": 30},
                 "aliases": {"acid": ["acid", "trip", "tripping", "lsd", "shrooms"], "drunk": ["drunk", "wasted", "hammered"],
                             "turn off": ["signal lost", "fake end", "kill the stream"]}},
@@ -156,6 +163,36 @@ class Features:
         if unprompted:
             self.sk.last_unprompted = time.monotonic()
 
+    HYPE_RE = re.compile(r"(\bpog|\blet'?s ?go+|\bhype\b|\bkekw\b|\blul\b|\bomegalul\b|\bw+\b$|\bgg+s?\b|\bclutch\b|"
+                         r"\binsane\b|!{3,}|\b(lmao+|lol+)\b)", re.I)
+    RIP_RE = re.compile(r"^\s*(f+|rip|o7|press f|f in (the )?chat|rip bozo|rest in peace)\s*$", re.I)
+
+    async def crowd(self, user, text):
+        """Chat spamming hype or F's at once -> Gary celebrates or mourns on the overlay."""
+        cc = self.cfg["crowd"]
+        now = time.monotonic()
+        win = cc.get("window_seconds", 10)
+        for kind, regex, need in (("hype", self.HYPE_RE, cc.get("hype_messages", 6)),
+                                  ("rip", self.RIP_RE, cc.get("rip_messages", 4))):
+            if not cc.get(kind) or not regex.search(text) or (kind == "hype" and len(text) > 60):
+                continue
+            hits = self.recent.setdefault(f"crowd_{kind}", [])
+            hits.append((now, user.lower()))
+            hits[:] = [h for h in hits if now - h[0] < win]
+            people = len({u for _, u in hits})
+            enough = len(hits) >= need and people >= (cc.get("hype_people", 4) if kind == "hype" else min(3, need))
+            if enough and now - self.recent.get(f"crowd_{kind}_at", -999) > cc.get("cooldown_seconds", 120):
+                self.recent[f"crowd_{kind}_at"] = now
+                hits.clear()
+                log.info("Chat is going %s", "wild" if kind == "hype" else "F")
+                await self.avatar_do(kind, "chat", n=people)
+
+    async def avatar_do(self, name, who="", **info):
+        """One-shot animation on the 3D overlay: raid, sub, bits, follow, hype, rip, redeem..."""
+        do = {"name": name, "at": int(time.time() * 1000), "who": who or ""}
+        do.update({k: v for k, v in info.items() if v not in (None, "", 0)})
+        await self.sk.send_overlays({"type": "avatar", "set": {"do": do}})
+
     def alert_task(self, prompt):
         self.task(prompt, alert=True)
 
@@ -265,6 +302,7 @@ class Features:
                 return True
         if user.lower() in self.sk.ignore:
             return False
+        await self.crowd(user, text.strip())
         if self.take_answer(user, text.strip()):
             return True
         self.note_arrival(user, text)
@@ -419,6 +457,15 @@ class Features:
         start = r"\b(start|do|run|make|host|open|let'?s (do|have|play)|time for|new|another|quick)\b"
         if await self.move_command(c):
             return True
+        if re.search(r"^(rip|f|o7)$|\b(press f|f in (the )?chat|rest in peace|we died|i died|i'?m dead|pay respects)\b", c):
+            await self.avatar_do("rip", self.streamer)
+            self.task(f"{self.streamer} just died or failed hard (\"{c}\"). Pay your respects in one short, dramatic, "
+                      "funny line.")
+            return True
+        if re.search(r"\b(hype it up|get hype|celebrate|party time|hype mode)\b|\blet'?s go+$", c):
+            await self.avatar_do("hype", self.streamer)
+            self.task("Something big just happened and {0} wants hype. Go all out in one short line.".format(self.streamer))
+            return True
         if re.search(r"\bclip (that|this|it)\b", c):
             await self.clip()
             return True
@@ -542,6 +589,9 @@ class Features:
             await self.on_scene(g("name") or g("scene"))
         elif kind == "voice":     # buttons/docks: always a request, so phrase it as one
             await self.voice_command(f"please {g('effect', 'random').lower()} voice")
+        elif kind == "do":          # test the overlay's event animations: /api/do?name=raid&who=Bob&n=50
+            await self.avatar_do(g("name", "hype"), g("who", "TestUser"), n=int(g("n", 0) or 0),
+                                 months=int(g("months", 0) or 0), title=g("title"))
         elif kind == "fx":
             await self.fx_command(f"please {g('effect').lower()}")
         elif kind == "leaderboard":
@@ -1158,6 +1208,11 @@ class Features:
         if source != "Twitch" or not self.cfg["events"].get("enabled"):
             return
         user = event_user(data) or "someone"
+        if etype == "RewardRedemption":
+            reward = data.get("reward") if isinstance(data.get("reward"), dict) else {}
+            title = _first(reward, ("title", "name")) or _first(data, ("rewardName", "reward_title", "title")) or "a redeem"
+            await self.avatar_do("redeem", user, title=title)
+            return
         kind = {"Raid": "raid", "Sub": "sub", "ReSub": "resub", "GiftSub": "gift", "GiftBomb": "giftbomb",
                 "Cheer": "cheer", "Follow": "follow"}.get(etype)
         if not kind:
@@ -1209,24 +1264,29 @@ class Features:
             if so:
                 asyncio.create_task(self.run_action(so[0], user))
             self.log_event(f"raid from {user} ({viewers} viewers)")
+            await self.avatar_do("raid", user, n=viewers)
         elif kind == "giftbomb":
             self.gift_bombs[user.lower()] = now + 60
             self.alert_task(f"{user} just gifted {count or 'a bunch of'}{tier_txt} subs to chat!{known} Lose your mind about it "
                       "for one or two sentences and thank them by name.")
             self.log_event(f"{user} gifted {count} subs")
+            await self.avatar_do("sub", user, n=count)
         elif kind == "gift":
             self.alert_task(f"{user} just gifted a{tier_txt} sub to {recipient or 'someone in chat'}.{known} Thank the gifter and "
                       "welcome the recipient, one sentence.")
             self.log_event(f"{user} gifted a sub to {recipient}")
+            await self.avatar_do("sub", user, n=1)
         elif kind in ("sub", "resub"):
             span = f"for {months} months" if months > 1 else "for the first time"
             self.alert_task(f"{user} just subscribed{tier_txt} {span}.{known} Thank them by name in one or two sentences; if "
                       "you remember something about them, work it in. Milestones (6, 12, 24 months) deserve extra hype.")
             self.log_event(f"{user} subscribed{tier_txt} ({months or 1} months)")
+            await self.avatar_do("sub", user, months=months or 1)
         elif kind == "cheer":
             self.alert_task(f"{user} just cheered {bits} bits.{known} Thank them by name in one sentence, bigger hype for "
                       "bigger amounts.")
             self.log_event(f"{user} cheered {bits} bits")
+            await self.avatar_do("bits", user, n=bits)
         elif kind == "follow":
             if self.cfg["events"].get("follows"):
                 self.follows.append(user)
@@ -1239,6 +1299,7 @@ class Features:
             self.recent["follow_said"] = now
             self.alert_task(f"New follower{'s' if len(names) > 1 else ''}: {', '.join(names)}. Welcome them by name in one "
                       "quick sentence.")
+            asyncio.create_task(self.avatar_do("follow", ", ".join(names), n=len(names)))
 
     # ------------------------------------------------------------ clips and recaps
 
@@ -1318,6 +1379,14 @@ class Features:
         self.scene = name
         low = name.lower()
         log.info("Scene: %s", name)
+        mode = next((m for m, pat in self.cfg["scene_modes"].items() if re.search(pat, low)), "normal")
+        acts = dict(self.sk.avatar.get("acts") or {})
+        if acts.get("scene") != mode:
+            acts.update(scene=mode, sceneAt=int(time.time() * 1000))
+            self.sk.avatar["acts"] = acts    # full dict: the overlay's avatar.update is shallow
+            await self.sk.send_overlays({"type": "avatar", "set": {"acts": acts}})
+            await self.sk.push_status()
+            log.info("Gary's stream mode: %s", mode)
         role = next(((k, v) for k, v in self.cfg.get("roles", {}).items() if k.lower() in low), None)
         if role and (not self.role or self.role[0] != role[0]):
             self.role = role
