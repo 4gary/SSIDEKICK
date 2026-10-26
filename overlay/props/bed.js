@@ -39,7 +39,7 @@ export function build(THREE, ctx) {
   // Blanket: superellipse cross-section swept along x, rounded (domed) at both ends.
   // Built in absolute prop coords, then shifted so the blanket group can pivot at y = PIVOT.
   function quiltGeometry() {
-    const x0 = -1.45, x1 = -0.1, a = 0.62, b = 0.34, yc = 0.64, PIVOT = 0.38;
+    const x0 = -1.45, x1 = 0.2, a = 0.62, b = 0.34, yc = 0.64, PIVOT = 0.38;
     const NX = 40, NZ = 56, R = 0.25, EXP = 2.4;
     const sp = (v, e) => Math.sign(v) * Math.pow(Math.abs(v), e);
     const dirZ = [], dirY = [];
@@ -138,8 +138,8 @@ export function build(THREE, ctx) {
 
   // mattress: puffy, top at y = 0.38
   ctx.mesh(rbox(2.72, 0.22, 1.06, 0.09, 16), mattMat, root, [0, 0.27, 0]);
-  // big fluffy pillow at the headboard end: x 0.45..1.25, top at y 0.735
-  ctx.mesh(rbox(0.8, 0.36, 0.92, 0.16, 16), pillowMat, root, [0.85, 0.555, 0]);
+  // big fluffy pillow at the headboard end: x 0.35..1.35, top at y 0.735 (same height as before, wider so the head fits)
+  ctx.mesh(rbox(1.0, 0.36, 1.1, 0.2, 16), pillowMat, root, [0.85, 0.555, 0]);
 
   // ---------- blanket (covering) ----------
   const blanketG = new THREE.Group();
@@ -164,8 +164,10 @@ export function build(THREE, ctx) {
 
   // ---------- state ----------
   let k = 0; // 0 = folded at the foot, 1 = covering him
-  const spots = { use: { x: -1.3, y: 0.67, z: 0, yaw: 0, pose: "lie" } };
-  const anchors = { pillow: new THREE.Vector3(0.85, 0.735, 0) };
+  // use.x puts the head centre (about 1.59 from the spot) on the pillow centre at x 0.85
+  const spots = { use: { x: -0.74, y: 0.67, z: 0, yaw: 0, pose: "lie" } };
+  // pillow: centre of the pillow top. capHook: top of the near (+z) bedpost, where a cap can hang
+  const anchors = { pillow: new THREE.Vector3(0.85, 0.735, 0), capHook: new THREE.Vector3(1.41, 1.06, 0.52) };
 
   return {
     root,
