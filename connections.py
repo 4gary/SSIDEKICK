@@ -98,6 +98,7 @@ class StreamerBot:
         self.on_event = None
         self._warned = False      # "not connected" warning is logged once per outage, not every 5 s
         self._sub_logged = False  # the first raw Subscribe reply is logged once, so its shape is visible
+        self._tasks = set()       # strong refs to our background tasks (asyncio only keeps weak ones)
 
     async def run(self, on_chat=None, on_status=None):
         self.on_chat, self.on_status = on_chat, on_status
@@ -121,6 +122,13 @@ class StreamerBot:
             await self._status()
             await asyncio.sleep(5)
 
+    def _spawn(self, coro):
+        """Runs coro as its own task, so one failing handler can't end the reader. The set keeps it alive."""
+        t = asyncio.create_task(coro)
+        self._tasks.add(t)
+        t.add_done_callback(self._tasks.discard)
+        return t
+
     async def _status(self):
         if self.on_status:
             await self.on_status()
@@ -141,12 +149,19 @@ class StreamerBot:
             if ev and self.on_chat and ev.get("type") in CHAT_EVENTS.get(ev.get("source"), []):
                 name, text = _parse_chat(data.get("data") or {})
                 if name and text:
-                    await self.on_chat(name, text, ev["source"].lower())
+                    # as a task: a bug in a chat feature must not drop the socket (and every event with it)
+                    self._spawn(self._chat(name, text, ev["source"].lower()))
             elif ev:
                 log.info("[sb] %s.%s from %s", ev.get("source"), ev.get("type"), _who(data.get("data") or {}))
                 if self.on_event:
                     # as a task, so the handler can make its own requests without blocking this reader
-                    asyncio.create_task(self._event(ev.get("source"), ev.get("type"), data.get("data") or {}))
+                    self._spawn(self._event(ev.get("source"), ev.get("type"), data.get("data") or {}))
+
+    async def _chat(self, user, text, platform):
+        try:
+            await self.on_chat(user, text, platform)
+        except Exception as e:
+            log.warning("Couldn't handle chat from %s: %s", user, e)
 
     async def _event(self, source, etype, data):
         try:
