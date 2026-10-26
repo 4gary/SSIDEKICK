@@ -364,14 +364,15 @@ mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02
 mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
 
 // arms: shoulder + elbow pivots so they bend naturally
+const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.30 * side, 0.58, 0]);
+  const sh = group(torso, [0.30 * side, 0.62, 0]);
   mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
   mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.068, 0.16, 8, 16), M.skin, sh, [0, -0.18, 0]);   // upper arm
-  const el = group(sh, [0, -0.26, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.062, 0.17, 8, 16), M.skin, el, [0, -0.1, 0]);    // forearm
-  const hand = group(el, [0, -0.22, 0]);
+  const up = mesh(new THREE.CapsuleGeometry(0.068, ARM_L1 - 0.096, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
+  const el = group(sh, [0, -ARM_L1, 0]);
+  const fore = mesh(new THREE.CapsuleGeometry(0.062, ARM_L2 - 0.084, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
+  const hand = group(el, [0, -ARM_L2, 0]);
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
   for (let i = 0; i < 3; i++) mesh(sphere, M.skin, hand, [(i - 1) * 0.045, -0.11, 0.01], [0.028, 0.035, 0.028]);  // finger bumps
