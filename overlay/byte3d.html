@@ -134,7 +134,7 @@ key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 key.shadow.camera.left = -3; key.shadow.camera.right = 3; key.shadow.camera.top = 3.5; key.shadow.camera.bottom = -1.5;
 key.shadow.camera.near = 0.5; key.shadow.camera.far = 20;
-key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025; key.shadow.radius = 5;
+key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025;
 scene.add(key); scene.add(key.target);
 const rim = new THREE.DirectionalLight(0xbfe0ff, 1.5);
 scene.add(rim); scene.add(rim.target);
@@ -325,7 +325,6 @@ const M = {
   hair: new THREE.MeshStandardMaterial({ color: 0x5a3418, roughness: 0.85, bumpMap: fuzzBump, bumpScale: 2 }),
   stache: new THREE.MeshStandardMaterial({ color: 0x3f2310, roughness: 0.9 }),
   face: null,
-  cornea: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.06, clearcoat: 1, transparent: true, opacity: 0.16, depthWrite: false }),
   shirt: new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.9, bumpMap: fuzzBump, bumpScale: 0.4 }),
   jeans: new THREE.MeshStandardMaterial({ map: denimTex, roughness: 0.95 }),
   shoe: new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.55 }),
@@ -449,11 +448,6 @@ const F2P = {                                                    // face angle -
   s: FACE.W / (FACE.az1 - FACE.az0),                              // pixels per radian
 };
 const EYE = { az: 0.4, el: -0.26, w: 0.3, h: 0.27 };          // big banner eyes
-for (const side of [-1, 1]) {                                   // glossy corneas catch the light
-  const c = onFace(new THREE.Group(), EYE.az * side, EYE.el, 0.004);
-  const m = mesh(sphere, M.cornea, c, [0, 0, 0], [EYE.w * 0.62 * 0.9, EYE.h * 0.62 * 0.9, 0.05]);
-  m.castShadow = false; m.renderOrder = 2;
-}
 
 // mustache: a walrus of fuzzy lumps, drooping past the mouth corners
 const stacheG = onFace(new THREE.Group(), 0, -0.47, -0.012); stacheG.scale.setScalar(1.15);
@@ -746,11 +740,20 @@ function drawMouth() {
   }
   g.restore();
 }
-let lastFaceKey = "";
+let lastFaceKey = "", lastFaceDraw = 0;
+function faceKey() {                                              // quantised face state as a string; gaze and pupil to 1/40 so jitter does not redraw
+  const f = face, m = f.mouth;
+  let k = "";
+  for (let i = 0; i < 2; i++) k += Math.round(f.squash[i] * 80) + "," + Math.round(f.lid[i] * 80) + "," + Math.round(f.lower[i] * 80) + "," + Math.round(f.browY[i] * 80) + "," + Math.round(f.browTilt[i] * 80) + "|";
+  return k + Math.round(f.wide * 80) + "," + Math.round(f.gx * 40) + "," + Math.round(f.gy * 40) + "," + Math.round(f.pupil * 40) + "," + Math.round(f.blush * 80) + "|" +
+    Math.round(m.open * 80) + "," + Math.round(m.width * 80) + "," + Math.round(m.round * 80) + "," + Math.round(m.smile * 80) + "," + Math.round(m.shift * 80);
+}
 function drawFace() {
-  const key = JSON.stringify(face, (k, v) => typeof v === "number" ? Math.round(v * 80) : v);
+  const key = faceKey();
   if (key === lastFaceKey) return;
-  lastFaceKey = key;
+  const now = performance.now();
+  if (now - lastFaceDraw < 1000 / 30) return;                     // at most 30 redraws a second; the key stays stale, so the next call retries
+  lastFaceDraw = now; lastFaceKey = key;
   const g = fg;
   g.clearRect(0, 0, FACE.W, FACE.H);
   for (const side of [-1, 1]) {                               // cheeks
