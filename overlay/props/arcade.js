@@ -227,7 +227,8 @@ export function build(THREE, ctx) {
   // ---------- plinth, body, top with marquee ----------
   ctx.mesh(slabY(0.76, 0.74, 0.12, 0.04), mDark, root, [0, 0.06, -0.05]);
   ctx.mesh(slabY(0.80, 0.70, 1.66, 0.07, 0.03), mBody, root, [0, 0.12 + 0.83, -0.05]);
-  // header box is set back from the screen housing so Gary's crown (base at y 1.81) clears it
+  // header box is set back (z -0.12) from the screen housing so Gary's head does not clip it when he stands at the screen;
+  // cabinet top is y 2.0, below his skull top (about 2.24 at byte3d scale 1)
   ctx.mesh(slabY(0.81, 0.57, 0.04, 0.05, 0.012), mTrim, root, [0, 1.78, -0.12]);
   ctx.mesh(slabY(0.80, 0.56, 0.22, 0.07, 0.03), mBody, root, [0, 1.89, -0.12]);
 
@@ -302,7 +303,8 @@ export function build(THREE, ctx) {
 
   return {
     root,
-    spots: { use: { x: 0, y: 0, z: 1.0, yaw: PI, pose: 'stand' } },
+    // with the slot yaw of -0.75 his total yaw is 1.66, a profile facing the screen; he stands left of the cabinet front
+    spots: { use: { x: -0.55, y: 0, z: 0.95, yaw: 2.41, pose: 'stand' } },
     anchors,
     update(dt, t = 0, st = {}) {
       dt = Math.max(0, Math.min(dt, 0.05));
