@@ -357,23 +357,23 @@ const hips = group(squash, [0, 0.46, 0]);
 const torso = group(hips);
 
 // body: a chubby lathe, striped tee, dark collar, belt line
-const bodyProfile = [[0.31, 0.0], [0.37, 0.12], [0.40, 0.28], [0.385, 0.44], [0.33, 0.57], [0.24, 0.65], [0.13, 0.70], [0.0, 0.70]]
+const bodyProfile = [[0.30, 0.0], [0.335, 0.12], [0.34, 0.28], [0.325, 0.44], [0.29, 0.56], [0.22, 0.64], [0.14, 0.69], [0.0, 0.70]]
   .map(([r, y]) => new THREE.Vector2(r, y));
-const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.95]);
-mesh(new THREE.TorusGeometry(0.165, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.68, 0.0], [1, 1, 0.95], [Math.PI / 2, 0, 0]);
-mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.2, 24), M.skin, torso, [0, 0.64, 0.0]);          // short neck: shows between the chin and the collar
-mesh(new THREE.CylinderGeometry(0.35, 0.32, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.95]);
-mesh(new THREE.TorusGeometry(0.345, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.95], [Math.PI / 2, 0, 0]); // belt
+const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.86]);
+mesh(new THREE.TorusGeometry(0.145, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.685, 0.0], [1, 1, 0.86], [Math.PI / 2, 0, 0]);
+mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.18, 24), M.skin, torso, [0, 0.66, 0.0]);          // short neck: shows between the chin and the collar
+mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
+mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
 
 // arms: shoulder + elbow pivots so they bend naturally
 const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.36 * side, 0.62, 0]);
-  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.14, 0.13, 0.13]);                                 // sleeve cap
-  mesh(new THREE.CylinderGeometry(0.11, 0.10, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);        // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.08, ARM_L1 - 0.12, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
+  const sh = group(torso, [0.30 * side, 0.62, 0]);
+  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
+  mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
+  const up = mesh(new THREE.CapsuleGeometry(0.068, ARM_L1 - 0.096, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
   const el = group(sh, [0, -ARM_L1, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.073, ARM_L2 - 0.106, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
+  const fore = mesh(new THREE.CapsuleGeometry(0.062, ARM_L2 - 0.084, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
   const hand = group(el, [0, -ARM_L2, 0]);
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
@@ -385,9 +385,9 @@ const armN = arm(-1), armP = arm(1);              // armP holds the cigarette si
 
 function leg(side) {
   const hp = group(hips, [0.135 * side, 0.0, 0]);
-  mesh(new THREE.CapsuleGeometry(0.12, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);           // thigh
+  mesh(new THREE.CapsuleGeometry(0.1, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);            // thigh
   const kn = group(hp, [0, -0.21, 0]);
-  mesh(new THREE.CapsuleGeometry(0.105, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
+  mesh(new THREE.CapsuleGeometry(0.088, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
   const ft = group(kn, [0, -0.2, 0]);
   mesh(sphere, M.shoe, ft, [0, -0.0, 0.04], [0.115, 0.075, 0.165]);                           // sneaker body
   mesh(sphere, M.shoe, ft, [0, -0.01, 0.13], [0.1, 0.06, 0.09]);                              // toe cap
@@ -402,7 +402,7 @@ const neck = group(torso, [0, 0.70, 0]);
 const head = new THREE.Group(); head.position.y = 0.45;
 const HA = 0.66, HB = 0.60, HC = 0.62;          // head ellipsoid radii
 mesh(sphere, M.skin, head, [0, 0, 0], [HA, HB, HC]);
-mesh(sphere, M.skin, head, [0, -0.28, 0.0], [0.62, 0.32, 0.40]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
+mesh(sphere, M.skin, head, [0, -0.28, 0.0], [0.53, 0.30, 0.40]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
 mesh(sphere, M.skin, head, [0, -0.25, 0.59], [0.07, 0.06, 0.065]);  // nose
 
 function onFace(obj, az, el, off = 0) {         // place on the head surface at azimuth/elevation (radians), local +z = surface normal
@@ -481,36 +481,45 @@ const ember = mesh(sphere, M.ember, cig, [0, 0, 0.39], [0.024, 0.024, 0.012]);
 const emberLight = new THREE.PointLight(0xff6020, 0.15, 0.7, 2);
 emberLight.position.z = 0.4; cig.add(emberLight);
 
-// cap: a felt crown that hugs the skull (about 0.06 proud of it), a short band at the rim, a button, and a visor
-// capG keeps its pivot (animation moves it); capIn holds the geometry, centred on the crown (head 0, 0.04, -0.02)
-const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = -0.05;
-const capIn = group(capG, [0, -0.16, 0.01]);
+// cap: a baseball cap. A felt crown with taller front panels, its rim about 0.05 off the hair, a button, and a bill
+// that juts from the front and curves down at the sides. capG keeps its pivot (animation moves it); capIn holds the
+// geometry with the rim at its origin (head 0, 0.13, -0.02). Tilted back a little, so the rim sits lower at the nape.
+const CAP = { rx: 0.71, rz: 0.69, h: 0.56, front: 0.12, bill: 0.48, tilt: -0.08 };
+const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = CAP.tilt;
+const capIn = group(capG, [0, -0.07, 0.01]);
 {
-  const crownGeo = new THREE.SphereGeometry(1, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.73, 0.66, 0.69);
+  const crownGeo = new THREE.SphereGeometry(1, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  const cp = crownGeo.attributes.position;
+  for (let i = 0; i < cp.count; i++) {
+    const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i);
+    const tall = 1 + CAP.front * Math.max(0, z) * (1 - y * 0.4);          // front panels stand taller, the back slopes away
+    const box = 1 + 0.06 * Math.sin(Math.PI * y);                         // fuller shoulders, less of a dome
+    cp.setXYZ(i, x * CAP.rx * box, y * CAP.h * tall, z * CAP.rz * box);
+  }
+  crownGeo.computeVertexNormals();
   const crown = mesh(crownGeo, M.cap, capIn);
   crown.material = M.cap.clone(); crown.material.side = THREE.DoubleSide;
-  capIn.add(makeFur(crownGeo, M.cap, { layers: 10, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
-  const bandGeo = new THREE.TorusGeometry(0.735, 0.035, 12, 72).rotateX(Math.PI / 2).scale(1, 1, 0.95);
-  mesh(bandGeo, M.capPlain, capIn);
-  capIn.add(makeFur(bandGeo, M.capPlain, { layers: 10, length: 0.03, density: 90, root: 0.6, tip: 1.1 }));
-  const buttonGeo = new THREE.SphereGeometry(0.055, 24, 16).scale(1, 0.6, 1).translate(0, 0.66, 0);
+  capIn.add(makeFur(crownGeo, M.cap, { layers: 14, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
+  const buttonGeo = new THREE.SphereGeometry(0.05, 24, 16).scale(1, 0.6, 1).translate(0, CAP.h + 0.005, 0);
   mesh(buttonGeo, M.capPlain, capIn);
   capIn.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
 
-  // visor: a crescent that starts at the band front and widens forward, bent down a little at the sides
+  // bill: a crescent from the crown's front rim out to a rounded front edge, narrower than the crown, curved down at the sides
+  const bw = 0.62, rimZ = CAP.rz * Math.sqrt(1 - (bw / CAP.rx) ** 2) - 0.02;   // where the bill's sides meet the rim
   const bs = new THREE.Shape();
-  bs.moveTo(0.735, 0);
-  bs.absellipse(0, 0, 0.735, 0.70, 0, Math.PI, false);      // inner edge follows the band's front half
-  bs.lineTo(-0.80, 0);
-  bs.absellipse(0, 0, 0.80, 1.2, Math.PI, 0, true);         // outer edge, out to the visor front
-  bs.closePath();
-  const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.045, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 40 });
-  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.045, 0);
+  bs.moveTo(bw, rimZ);
+  bs.absellipse(0, rimZ, bw, CAP.rz + CAP.bill - rimZ, 0, Math.PI, false);  // outer edge, out to the bill front
+  for (let k = 0; k <= 32; k++) {                                            // inner edge back along the rim
+    const x = lerp(-bw, bw, k / 32);
+    bs.lineTo(x, (CAP.rz - 0.02) * Math.sqrt(Math.max(0, 1 - (x / (CAP.rx - 0.02)) ** 2)));
+  }
+  const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 40 });
+  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.04, 0);
   const bp = brimGeo.attributes.position;
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), z = bp.getZ(i);
-    const f = clamp(z / 1.2, 0, 1);
-    bp.setY(i, bp.getY(i) - 0.10 * (x / 0.8) ** 2 * (0.4 + 0.6 * f) - 0.03 * f * f);   // slight downward curve, sides lower
+    const f = clamp((z - rimZ) / (CAP.rz + CAP.bill - rimZ), 0, 1);           // 0 at the rim .. 1 at the bill front
+    bp.setY(i, bp.getY(i) - 0.24 * (x / bw) ** 2 * (0.35 + 0.65 * f) - 0.12 * f);   // curved bill, pitched down a touch
   }
   brimGeo.computeVertexNormals();
   const brim = group(capIn);
@@ -1025,7 +1034,7 @@ function bodyR(y) {
   for (let i = 1; i < BODY_R.length; i++) if (y <= BODY_R[i][1]) { const [r0, y0] = BODY_R[i - 1], [r1, y1] = BODY_R[i]; return lerp(r0, r1, (y - y0) / (y1 - y0)); }
   return 0;
 }
-const ARM_PTS = [["sh", -0.15, 0.082, 0], ["el", 0, 0.076, 0], ["el", -0.13, 0.075, 1], ["hand", -0.04, 0.068, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
+const ARM_PTS = [["sh", -0.15, 0.07, 0], ["el", 0, 0.064, 0], ["el", -0.13, 0.064, 1], ["hand", -0.04, 0.068, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
 const _kp = new THREE.Vector3(), _kh = new THREE.Vector3(), _kq = new THREE.Quaternion();
 function armHit(arm, k, which) {            // deepest point of this end of the arm inside the body: {pen, p, r}
   let best = null;
@@ -1352,7 +1361,7 @@ function bfGround(size) {                                       // where he runs
 function bfUpdate(t, dt) {
   if (!bf.g.visible) return;
   const size = settings.size, k = t - bf.t0, sd = bf.seed;
-  const cap = tmp.set(0, 0.63, -0.05); capG.localToWorld(cap);              // just above the crown button (the cap geometry sits 0.16 below capG)
+  const cap = tmp.set(0, 0.56, -0.05); capG.localToWorld(cap);              // just above the crown button (the cap rim sits 0.07 below capG)
   let p;
   if (bf.leave && t - bf.leave > 0) {                                    // flies away up and off
     const q = t - bf.leave; p = bf.pos.clone().add(new THREE.Vector3(Math.sin(q * 3) * 0.02 + 0.03, 0.04, 0).multiplyScalar(size * 40 * dt));
@@ -2709,7 +2718,7 @@ function update(dt) {
   }
   if (act.name === "drag") pP = blendPose(pP, reachPose(armP, headPoint(0.3, -0.72, 0.2)), Math.sin(Math.min(1, ap / 0.75) * Math.PI) ** 0.5);  // hand to the cigarette
   if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.0, 0.2 + Math.sin(t * 16) * 0.04, 0.12)), w); }   // the temple, not the crown
-  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.06, 0.20)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the band at the side of his head (the brim dips to head y -0.06 there)
+  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.2, 0.22)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the bill at the side of his head (the bill's side sits near head y 0.1)
   if (act.name === "wave") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, eulerPose(-2.1, 0, 0.9 + Math.sin(t * 14) * 0.25, -1.0), w); }
   if (act.name === "stretch") { const w = Math.sin(ap * Math.PI) ** 0.5; pN = blendPose(pN, POSE.up(-1), w); pP = blendPose(pP, POSE.up(1), w); }
   if (S.hop > 0) { const hopQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.6, 0, 0)); pN.q.premultiply(hopQ); pP.q.premultiply(hopQ); }
@@ -2725,7 +2734,7 @@ function update(dt) {
   const pitchV = (S.nod - prevHeadPitch) / Math.max(dt, 1e-3), yawV = (S.headYaw - prevHeadYaw) / Math.max(dt, 1e-3);
   prevHeadPitch = S.nod; prevHeadYaw = S.headYaw;
   const capLag = capSpring.update(dt, 0, -pitchV * dt * 0.9 - (vy > 0 ? vy * dt * 2 : 0));
-  capG.rotation.x = -0.05 + capLag * 0.25 + (act.name === "cap" ? 0.12 * Math.sin(ap * Math.PI) : 0);
+  capG.rotation.x = CAP.tilt + capLag * 0.25 + (act.name === "cap" ? 0.12 * Math.sin(ap * Math.PI) : 0);
   capG.position.y = 0.2 + (act.name === "cap" ? 0.03 * Math.sin(ap * Math.PI) : 0) + 0.32 * J.capPop;
   capG.rotation.x -= 0.5 * J.capPop;
   const hairLag = hairSpring.update(dt, 0, -yawV * dt * 0.6);
