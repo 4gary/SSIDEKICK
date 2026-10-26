@@ -399,7 +399,7 @@ const neck = group(torso, [0, 0.70, 0]);
 const head = new THREE.Group(); head.position.y = 0.45;
 const HA = 0.66, HB = 0.60, HC = 0.62;          // head ellipsoid radii
 mesh(sphere, M.skin, head, [0, 0, 0], [HA, HB, HC]);
-mesh(sphere, M.skin, head, [0, -0.3, 0.05], [0.53, 0.3, 0.47]);  // chubby jaw/cheeks
+mesh(sphere, M.skin, head, [0, -0.28, 0.0], [0.62, 0.32, 0.40]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
 mesh(sphere, M.skin, head, [0, -0.25, 0.59], [0.07, 0.06, 0.065]);  // nose
 
 function onFace(obj, az, el, off = 0) {         // place on the head surface at azimuth/elevation (radians), local +z = surface normal
@@ -455,11 +455,11 @@ for (const side of [-1, 1]) {                                   // glossy cornea
 }
 
 // mustache: a walrus of fuzzy lumps, drooping past the mouth corners
-const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setScalar(1.15);
+const stacheG = onFace(new THREE.Group(), 0, -0.47, -0.012); stacheG.scale.setScalar(1.15);
 {
   const parts = [];
   for (const side of [-1, 1]) {
-    const lumps = [[0.055, 0.0, 0.02, 0.085, 0.06, 0.05], [0.145, -0.03, 0.0, 0.07, 0.05, 0.045], [0.22, -0.085, -0.03, 0.05, 0.045, 0.035]];
+    const lumps = [[0.055, 0.02, 0.02, 0.085, 0.06, 0.05], [0.145, -0.01, 0.0, 0.07, 0.05, 0.045], [0.22, -0.05, -0.03, 0.05, 0.04, 0.035]];   // shorter droop so the open mouth shows below it
     for (const [x, y, z, sx, sy, sz] of lumps) {
       const g = new THREE.SphereGeometry(1, 24, 16);
       g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x * side, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -side * 0.5)), new THREE.Vector3(sx, sy, sz)));
@@ -473,7 +473,7 @@ const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setSc
 }
 
 // cigarette hanging out the right corner of the mouth
-const cig = onFace(new THREE.Group(), 0.2, -0.7, -0.015);
+const cig = onFace(new THREE.Group(), 0.2, -0.8, -0.015);
 cig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0.8, -0.28, 0.5).normalize());
 const cyl = (r, l) => new THREE.CylinderGeometry(r, r, l, 16).rotateX(Math.PI / 2).translate(0, 0, l / 2);
 mesh(cyl(0.026, 0.1), M.filter, cig);
@@ -697,7 +697,7 @@ function drawBrow(side, i) {
 }
 function drawMouth() {
   const g = fg, m = face.mouth;
-  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.68);
+  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.80);
   const hw = 0.145 * F2P.s * m.width * (1 - 0.45 * m.round);
   const open = m.open * (0.75 + 0.5 * m.round);
   const corner = -m.smile * hw * 0.32;                      // corners up for a smile
