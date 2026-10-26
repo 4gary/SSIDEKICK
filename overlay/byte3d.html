@@ -1951,8 +1951,8 @@ function startJob3(name, size) {
 }
 
 // ---- jobs: what he does there
-const FLOOR_LEGS = [{ hp: -1.35, kn: 2.5, ft: 0.4, z: -0.75 }, { hp: -1.35, kn: 2.5, ft: 0.4, z: 0.75 }];
-function sitFloor(k, size, drop = 0.34) {
+const FLOOR_LEGS = [{ hp: -1.57, kn: 0.15, ft: 0.25, z: -0.35 }, { hp: -1.57, kn: 0.15, ft: 0.25, z: 0.35 }];   // legs out in front, heels on the floor (was a kneel: the shins folded back)
+function sitFloor(k, size, drop = 0.30) {
   J.root = new THREE.Vector3(job.at.x, -drop * size, job.at.z); J.rootQ = new THREE.Quaternion(); J.rootW = k;
   J.legs = FLOOR_LEGS; J.legW = k;
 }
@@ -2007,8 +2007,8 @@ function poseJob3(name, t, dt, k) {
   if (name === "floorsit") {
     sitFloor(k, size);
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(6, 12); }
-    if (job.sub === 0) { J.torsoX = -0.3; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands
-    else if (job.sub === 1) { J.torsoX = 0.15; J.armN = reachPose(armN, tp(-0.24, 0.02, 0.36)); J.armP = reachPose(armP, tp(0.24, 0.02, 0.36)); }   // hands on his knees
+    if (job.sub === 0) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands (the reach clamp keeps the arms short)
+    else if (job.sub === 1) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.16, 0.0, 0.27)); J.armP = reachPose(armP, tp(0.16, 0.0, 0.27)); }   // hands resting on his knees
     else { J.torsoX = 0.1; J.armN = reachPose(armN, tp(-0.12, 0.08, 0.36)); J.armP = reachPose(armP, headPoint(0.25, -0.8, 0.15)); }               // chin in his hand
     J.wN = J.wP = k; J.neck = [0, 0.35 * Math.sin(t * 0.3), 0.08 * Math.sin(t * 0.5)]; J.neckW = k;
     J.face = fs => { fs.mouth.smile += 0.2; };
