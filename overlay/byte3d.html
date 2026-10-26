@@ -929,7 +929,7 @@ if (DEMO && !params.has("preview")) {
 }
 
 // ------------------------------------------------------------ animation state
-const S = {   // shared animation state (also fed to the VRM driver)
+const S = {   // shared animation state
   t: 0, level: 0, talk: 0, think: 0, blink: 0, gaze: { x: 0, y: 0 }, x: 0, yaw: 0,
   walkPhase: 0, moving: 0, hop: 0, nod: 0, tilt: 0, headYaw: 0,
 };
@@ -2640,7 +2640,6 @@ function update(dt) {
   }
 
   updateFur(t);
-  if (vrmRig) { vrmRig.update(dt, S); return; }
 
   // ---- drive the built-in model
   byte.position.set(nav.x, S.hop * size, nav.z);
