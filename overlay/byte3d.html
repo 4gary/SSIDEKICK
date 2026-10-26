@@ -959,11 +959,11 @@ const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 const clock = new THREE.Clock();
 
 // arm poses: shoulder quaternion + elbow bend. Static poses from Euler angles, reach poses from two-bone IK.
-const ARM = { L1: 0.26, L2: 0.22, reach: 0.26 + 0.22 + 0.04 };
+// the arm's rest geometry as the model built it, read once before the first stretch: joint and mesh offsets, and the bone lengths (L1 shoulder to elbow, L2 elbow to hand)
+function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, up: arm.up.position.y, fore: arm.fore.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
 const eulerPose = (sx, sy, sz, ex) => ({ q: new THREE.Quaternion().setFromEuler(new THREE.Euler(sx, sy, sz)), ex });
 const POSE = {
   rest: s => eulerPose(0.05, 0, 0.18 * s, -0.25),
-  wave: s => eulerPose(-2.1, 0, 0.9 * s, -1.0),
   gestureOut: s => eulerPose(-0.9, 0, 0.85 * s, -1.1),
   gestureUp: s => eulerPose(-1.6, 0, 0.5 * s, -1.6),
   gesturePoint: s => eulerPose(-1.3, -0.3 * s, 0.25 * s, -0.4),
@@ -972,17 +972,17 @@ const POSE = {
 };
 const _m4 = new THREE.Matrix4(), _ax = new THREE.Vector3(), _ay = new THREE.Vector3(), _az = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3();
 function reachPose(arm, target) {            // target in torso space; returns a pose whose hand lands on (or points at) the target
-  const S = arm.sh.position;
+  const SP = arm.sh.position, R = armRest(arm), reachMax = R.L1 + R.L2 + 0.04;
   if (target.y > 0 && target.y < 0.69) {                       // a hand target inside his belly gets pushed out to the shirt
     const ez = target.z / 0.86, d = Math.hypot(target.x, ez), r = bodyR(target.y) + 0.075;
     if (d < r) { if (d < 1e-3) target = new THREE.Vector3(0, target.y, r * 0.86); else target = new THREE.Vector3(target.x / d * r, target.y, ez / d * r * 0.86); }
   }
-  _d.copy(target).sub(S);
+  _d.copy(target).sub(SP);
   const want = _d.length();
-  const k = clamp(want / (ARM.reach - 0.01), 1, 1.7);          // cartoon stretch when the target is out of reach (his head is huge)
-  const dist = clamp(want, 0.08, (ARM.reach - 0.01) * k);
+  const k = clamp(want / (reachMax - 0.01), 1, 1.25);          // cartoon stretch when the target is out of reach, capped at 1.25x so the arm never rubber-bands
+  const dist = clamp(want, 0.08, (reachMax - 0.01) * k);
   _d.normalize();
-  const L1 = ARM.L1 * k, L2 = (ARM.L2 + 0.04) * k;
+  const L1 = R.L1 * k, L2 = (R.L2 + 0.04) * k;
   const cosE = clamp((L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2), -1, 1);
   const cosS = clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1);
   const bend = Math.PI - Math.acos(cosE), offset = Math.acos(cosS);
@@ -1006,7 +1006,8 @@ function applyArm(arm, p, dt, rate = 7) {
   arm.sh.quaternion.copy(u.p.q);
   arm.el.rotation.x = u.p.ex;
   const k = u.p.k ?? 1;                                       // stretch the arm along its length
-  arm.el.position.y = -0.26 * k; arm.up.position.y = -0.18 * k; arm.up.scale.y = k; arm.fore.position.y = -0.1 * k; arm.fore.scale.y = k; arm.hand.position.y = -0.22 * k;
+  const R = armRest(arm);                                     // offsets come from the built model, so bone changes made there carry through
+  arm.el.position.y = R.el * k; arm.up.position.y = R.up * k; arm.up.scale.y = k; arm.fore.position.y = R.fore * k; arm.fore.scale.y = k; arm.hand.position.y = R.hand * k;
   keepArmOut(arm, k, p.reach);
 }
 // keep the arm outside his belly: swing the shoulder out until the upper arm, elbow, forearm and hand clear the body
@@ -1030,12 +1031,12 @@ function armHit(arm, k, which) {            // deepest point of this end of the 
   return best;
 }
 function keepArmOut(arm, k, reach) {
-  const S = arm.sh.position;
+  const SP = arm.sh.position;
   for (let pass = 0; pass < 6; pass++) {
     arm.sh.updateMatrixWorld(true);
     let h = reach ? null : armHit(arm, k, 1);
     if (h) {                                 // hand or forearm inside: swing the whole arm so the hand comes out (mostly forward when it's in front)
-      const v = h.p.sub(S), len = v.length(); if (len < 0.05) return;
+      const v = h.p.sub(SP), len = v.length(); if (len < 0.05) return;
       const axis = v.clone().cross(h.r); if (axis.lengthSq() < 1e-8) axis.set(0, 0, arm.side);
       arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(axis.normalize(), Math.min(0.5, (h.pen + 0.005) / len)));
       continue;
@@ -1043,7 +1044,7 @@ function keepArmOut(arm, k, reach) {
     h = armHit(arm, k, 0); if (reach) { const h2 = armHit(arm, k, 1); if (h2 && (!h || h2.pen > h.pen)) h = h2; }
     if (!h) return;                          // elbow inside: turn the arm around the shoulder-hand line so the hand stays put and the elbow pokes out
     _kh.set(0, -0.04, 0); arm.hand.localToWorld(_kh); torso.worldToLocal(_kh);
-    const ax = _kh.sub(S).normalize(), v = h.p.sub(S), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
+    const ax = _kh.sub(SP).normalize(), v = h.p.sub(SP), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
     const rt = h.r.clone().sub(ax.clone().multiplyScalar(ax.dot(h.r)));
     if (dist < 0.03 || rt.lengthSq() < 0.05) {
       if (reach) return;                     // can't swing it clear without moving the hand off what it holds
