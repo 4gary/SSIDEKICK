@@ -411,6 +411,10 @@ class Features:
     def muted(self):
         return self.mute_until > time.monotonic()
 
+    def queued(self):
+        """True while a chat job or an alert is waiting to be spoken (alerts live in sidekick.py's own FIFO)."""
+        return bool(self.sk.jobs or getattr(self.sk, "alerts", None))
+
     def may_speak(self, kind, who=None):
         """Called by sidekick.py before every line. While muted only alerts (and the "going quiet" line) get through."""
         if not self.muted() or who == "quiet":
@@ -516,7 +520,9 @@ class Features:
             asyncio.create_task(self.sk.send_overlays({"type": "avatar", "set": {"do": {"name": "stop", "at": int(time.time() * 1000)}}}))
             if prev and self.sk.avatar.get("mode") == set_to:     # only if nothing moved him during the break
                 asyncio.create_task(self.set_avatar({"mode": prev}))
-        self.sk.jobs.clear(); self.sk.alerts.clear()   # anything that piled up is old news now
+        self.sk.jobs.clear()                            # anything that piled up is old news now
+        if getattr(self.sk, "alerts", None):
+            self.sk.alerts.clear()
         self.sk.want_chat, self.sk.want_interject = False, None
         log.info("Unmuted")
         asyncio.create_task(self.sk.push_status())
@@ -795,7 +801,7 @@ class Features:
 
     def greet_tick(self, now):
         self.arrivals = [a for a in self.arrivals if now - a["at"] < 180]
-        if not self.arrivals or self.sk.jobs or self.sk.alerts or self.sk.busy:
+        if not self.arrivals or self.queued() or self.sk.busy:
             return
         if now - self.last_greet < self.cfg["regulars"].get("greet_gap_seconds", 40):
             return
@@ -953,7 +959,7 @@ class Features:
 
     async def effect_tick(self, now):
         fx = self.cfg["voice_effects"]
-        if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.sk.jobs or self.sk.alerts:
+        if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.queued():
             return
         if self.muted() or self.away:     # he can't announce a prank while muted or away
             return
@@ -1104,7 +1110,7 @@ class Features:
         tr = self.trivia
         if not tr:
             return
-        if tr["phase"] == "ready" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs and not self.sk.alerts:
+        if tr["phase"] == "ready" and now >= tr["next_at"] and not self.sk.busy and not self.queued():
             q = tr["questions"][tr["n"]]
             tr.update(phase="asking", q=q, answers={}, asked_at=now)
             spoken = " ".join(f"{LETTERS[i]}, {c}." for i, c in enumerate(q["choices"]))
@@ -1131,7 +1137,7 @@ class Features:
             await self.chat(f"Answer: {correct}. " + (f"Correct: {names}" if right else "Nobody got it!"))
             tr["n"] += 1
             await self.broadcast()
-        elif tr["phase"] == "reveal" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs and not self.sk.alerts:
+        elif tr["phase"] == "reveal" and now >= tr["next_at"] and not self.sk.busy and not self.queued():
             if tr["n"] < tr["rounds"]:
                 tr["phase"] = "ready"
                 return
@@ -1598,7 +1604,7 @@ class Features:
 
     async def glance_tick(self, now):
         vc = self.cfg["vision"]
-        if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.sk.jobs or self.sk.alerts:
+        if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.queued():
             return
         if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race or self.glancing:
             return
