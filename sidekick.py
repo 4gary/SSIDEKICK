@@ -36,6 +36,7 @@ class Sidekick:
         self.beh = cfg["behavior"]
         self.transcript = collections.deque(maxlen=self.beh.get("history_lines", 30))
         self.jobs = collections.deque(maxlen=6)
+        self.alerts = collections.deque(maxlen=8)   # follows, raids, subs... they go first, in the order they happened
         self.want_chat = False
         self.want_interject = None
         self.last_activity = time.monotonic()
@@ -117,7 +118,9 @@ class Sidekick:
             if now - self.last_spoke < self.beh["min_gap_seconds"]:
                 continue
             job = None
-            if self.jobs:
+            if self.alerts:
+                job = self.alerts.popleft()
+            elif self.jobs:
                 job = self.jobs.popleft()
             elif self.want_interject:
                 job, self.want_interject = ("interject", self.bot["streamer_name"], self.want_interject), None
@@ -139,6 +142,7 @@ class Sidekick:
 
     async def handle(self, kind, who, text):
         if not self.features.may_speak(kind, who):
+            log.info("[skip] %s job dropped: muted", kind)
             return   # muted ("Gary, stop talking for 15 minutes"): only alerts get through
         hush = self.features.hush_gen
         if kind != "say":
@@ -357,7 +361,8 @@ class Sidekick:
         log.info("Control panel:       http://localhost:%d/control", port)
 
         tasks = [asyncio.create_task(self.director()),
-                 asyncio.create_task(self.memory.maintain(self.brain, lambda: not self.busy and not self.jobs)),
+                 asyncio.create_task(self.memory.maintain(
+                    self.brain, lambda: not self.busy and not self.jobs and not self.alerts)),
                  asyncio.create_task(self.features.run())]
         src = self.cfg["chat"].get("source", "streamerbot")
         use_sb_actions = bool(self.cfg["streamerbot"].get("url"))
