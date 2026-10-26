@@ -122,15 +122,26 @@ class Brain:
         }
         raw = await self._complete(self._system(extra, memory), user, schema if names else None)
         raw = THINK_RE.sub("", raw).strip()
-        speech, action = raw, None
+        speech, action, parsed = raw, None, False
         m = re.search(r"\{.*\}", raw, re.S)
         if m:
             try:
                 obj = json.loads(m.group(0))
                 speech = str(obj.get("say", ""))
                 action = str(obj.get("action", "")).strip() or None
-            except json.JSONDecodeError:
+                parsed = True
+            except (ValueError, AttributeError):
                 pass
+        if not parsed:
+            # cut off (max_tokens) or malformed: keep whatever "say" was written, never the braces and key names
+            sm = re.search(r'"say"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+            if sm:
+                try:
+                    speech = json.loads('"' + sm.group(1) + '"')
+                except ValueError:
+                    speech = sm.group(1)
+            elif raw.startswith("{"):
+                speech = ""   # JSON with no readable "say": better silence than reading the JSON out loud
         if action:
             # tolerate small spelling/case differences, but never run something not in the list
             lookup = {n.lower(): n for n in names}

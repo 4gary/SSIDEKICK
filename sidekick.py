@@ -3,17 +3,26 @@
 Chat (Streamer.bot or Twitch) -> Qwen in LM Studio -> local TTS -> talking avatar browser source.
 Run:  python sidekick.py
 """
+import os
+
+# Must be set before numpy / faster-whisper load: otherwise their console handler ends the process on Ctrl+C
+# before our own handler (below) can save memory and features.
+os.environ.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
+
 import asyncio
 import collections
+import copy
 import json
 import logging
-import os
+import logging.handlers
 import random
 import re
+import signal
 import sys
 import time
 import tomllib
 import uuid
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -29,6 +38,38 @@ OVERLAY = os.path.join(BASE, "overlay")
 log = logging.getLogger("sidekick")
 
 
+@web.middleware
+async def no_cache(request, handler):
+    """OBS keeps browser sources in a cache, so an updated overlay could show old code. These pages are never cached."""
+    try:
+        resp = await handler(request)
+    except web.HTTPException as e:   # 404s and the like are responses too
+        resp = e
+    if request.path == "/" or request.path.startswith(("/static", "/control", "/dock", "/games")):
+        resp.headers["Cache-Control"] = "no-store"
+    if request.path.startswith("/static"):
+        # the loader page is a local file in OBS, so its origin is "null": static files must allow it to check them
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+def foreign_origin(request):
+    """True when a web page from another site is calling us. Browsers say so in the Origin header; Streamer.bot,
+    curl and the OBS overlay (which is served by this app) either send no Origin or send localhost."""
+    origin = request.headers.get("Origin")
+    return bool(origin) and (urlsplit(origin).hostname or "") not in ("localhost", "127.0.0.1")
+
+
+def deep_merge(dst, src):
+    """Copies src into dst. Dicts merge key by key (so home.x doesn't wipe home.z); anything else is replaced."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
 class Sidekick:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -36,12 +77,14 @@ class Sidekick:
         self.beh = cfg["behavior"]
         self.transcript = collections.deque(maxlen=self.beh.get("history_lines", 30))
         self.jobs = collections.deque(maxlen=6)
+        self.alerts = collections.deque(maxlen=8)   # follows, raids, subs... they go first, in the order they happened
         self.want_chat = False
         self.want_interject = None
         self.last_activity = time.monotonic()
         self.last_spoke = 0.0
         self.last_unprompted = 0.0
         self.busy = False
+        self.spoke_until = 0.0   # mic lines heard before this are Gary's own voice coming back through the mic
         self.paused = False
         self.overlays, self.controls = set(), set()
         self.audio = collections.OrderedDict()
@@ -52,9 +95,12 @@ class Sidekick:
         self.ignore = {u.lower() for u in cfg["chat"].get("ignore_users", [])}
         self.tts = TTS(cfg, BASE)
         self.memory = Memory(cfg, BASE)
-        self.avatar = dict(cfg.get("avatar", {}))   # 3D avatar movement settings, relayed to overlays
+        self.avatar = copy.deepcopy(cfg.get("avatar", {}))   # 3D avatar movement settings, relayed to overlays
         self.sb = None
         self.features = Features(self)   # games, races, voice effects, greetings... (features.py)
+        saved = getattr(self.features, "saved_avatar", None)   # avatar settings kept across restarts, if features.py has them
+        if isinstance(saved, dict):
+            deep_merge(self.avatar, {k: v for k, v in saved.items() if k != "do"})
 
     # ------------------------------------------------------------ inputs
 
@@ -82,8 +128,8 @@ class Sidekick:
             self.want_chat = True
 
     async def on_streamer(self, text, spoken=False):
-        if spoken and self.busy and not self.features.is_hush(text):
-            return   # heard while Gary is talking: only "Gary, hold that thought" and the like count
+        if spoken and (self.busy or time.monotonic() < self.spoke_until) and not self.features.is_hush(text):
+            return   # heard while Gary is talking (or just after, while his voice is still in the mic): only "Gary, hold that thought" and the like count
         who = self.bot["streamer_name"]
         log.info("[%s] %s: %s", "mic" if spoken else "you", who, text)
         self.remember(who, text, "streamer")
@@ -110,13 +156,20 @@ class Sidekick:
         idle = self.beh.get("idle_seconds", 0)
         while True:
             await asyncio.sleep(0.3)
-            if self.paused or self.busy:
+            if self.paused:
+                # nothing queued during a pause is spoken after Resume: stale chat, alerts or "say" lines are dropped
+                self.jobs.clear(); self.alerts.clear()
+                self.want_chat, self.want_interject = False, None
+                continue
+            if self.busy:
                 continue
             now = time.monotonic()
             if now - self.last_spoke < self.beh["min_gap_seconds"]:
                 continue
             job = None
-            if self.jobs:
+            if self.alerts:
+                job = self.alerts.popleft()
+            elif self.jobs:
                 job = self.jobs.popleft()
             elif self.want_interject:
                 job, self.want_interject = ("interject", self.bot["streamer_name"], self.want_interject), None
@@ -138,6 +191,7 @@ class Sidekick:
 
     async def handle(self, kind, who, text):
         if not self.features.may_speak(kind, who):
+            log.info("[skip] %s job dropped: muted", kind)
             return   # muted ("Gary, stop talking for 15 minutes"): only alerts get through
         hush = self.features.hush_gen
         if kind != "say":
@@ -198,9 +252,10 @@ class Sidekick:
         except Exception as e:
             log.error("TTS failed (showing text only): %s", e)
         if not self.overlays:
-            log.warning("No overlay connected, so nobody hears this. Add http://localhost:%d as an OBS Browser Source.",
-                        self.cfg["server"]["port"])
+            log.warning("No overlay connected, so nobody hears this. Add the OBS Browser Source: local file "
+                        "overlay\\loader.html (see README, OBS section).")
         self.done.clear()
+        self.spoke_until = time.monotonic() + secs + 3   # the mic can hear the speakers for a few seconds after
         await self.send_overlays({"type": "say", "text": text, "audio": url, "seconds": secs})
         try:
             await asyncio.wait_for(self.done.wait(), secs + 5)
@@ -234,7 +289,39 @@ class Sidekick:
     async def push_status(self):
         await self.send_controls(self.status())
 
+    def store_avatar(self, change):
+        """Keeps the avatar settings. A "do" is a one-shot reaction: it is relayed by the caller, never stored."""
+        deep_merge(self.avatar, {k: v for k, v in change.items() if k != "do"})
+        f = getattr(self.features, "on_avatar_set", None)   # features.py saves these across restarts
+        if f:
+            f(self.avatar)
+
+    async def watch_lm(self):
+        """LM Studio is often started after Gary. Until it answers, look again every 30 s and update the panel."""
+        while True:
+            await asyncio.sleep(30)
+            if self.lm_status.startswith("Can't reach"):
+                status = await self.brain.check()
+                if status != self.lm_status:
+                    self.lm_status = status
+                    log.info(status)
+                    await self.push_status()
+
+    async def supervise(self, name, factory):
+        """Runs one background job forever. If it crashes, the error is logged and it starts again after 5 s."""
+        while True:
+            try:
+                await factory()
+                log.warning("%s stopped; restarting in 5s", name)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("%s crashed; restarting in 5s", name)
+            await asyncio.sleep(5)
+
     async def ws_handler(self, request):
+        if foreign_origin(request):
+            return web.Response(status=403, text="forbidden: this page is not from this PC")
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
         role = None
@@ -248,8 +335,7 @@ class Sidekick:
                     role = msg.get("role")
                     if role == "overlay":
                         self.overlays.add(ws)
-                        png = all(os.path.exists(os.path.join(OVERLAY, "avatar", f)) for f in ("closed.png", "open.png"))
-                        await ws.send_json({"type": "config", "name": self.bot["name"], "png": png})
+                        await ws.send_json({"type": "config", "name": self.bot["name"]})
                         await ws.send_json({"type": "avatar", "set": self.avatar})
                         log.info("Overlay connected")
                     else:
@@ -271,15 +357,22 @@ class Sidekick:
                 elif t == "idle_now":
                     self.jobs.append(("idle", None, None))
                 elif t == "pause":
-                    self.paused = not self.paused
-                    log.info("Paused" if self.paused else "Resumed")
+                    # "paused": true/false sets it outright (a stale page can't flip it the wrong way); otherwise it toggles
+                    self.paused = bool(msg["paused"]) if "paused" in msg else not self.paused
+                    if self.paused:
+                        self.jobs.clear(); self.alerts.clear()
+                        self.want_chat, self.want_interject = False, None
+                    log.info("Paused: queued lines dropped" if self.paused else "Resumed")
                     await self.push_status()
                 elif t == "skip":
                     await self.send_overlays({"type": "stop"})
                     self.done.set()
                 elif t == "avatar":
                     change = msg.get("set") or {}
-                    self.avatar.update(change)
+                    acts = change.get("acts")
+                    if isinstance(acts, dict) and "scene" in acts and "sceneAt" not in acts:
+                        acts["sceneAt"] = int(time.time() * 1000)   # when the scene was picked, so an old pick isn't replayed
+                    self.store_avatar(change)
                     await self.send_overlays({"type": "avatar", "set": change})
                     await self.push_status()
                 elif t == "refresh":
@@ -296,6 +389,8 @@ class Sidekick:
 
     async def api(self, request):
         """GET or POST /api/{event|say|streamer|chat}?text=...  (handy for Streamer.bot 'Fetch URL')."""
+        if foreign_origin(request):
+            return web.json_response({"ok": False, "error": "forbidden"}, status=403)
         params = dict(request.query)
         if request.method == "POST" and request.can_read_body:
             try:
@@ -336,8 +431,8 @@ class Sidekick:
         self.brain = Brain(self.cfg, session)
         port = self.cfg["server"]["port"]
 
-        app = web.Application()
-        app.router.add_get("/", lambda r: web.FileResponse(os.path.join(OVERLAY, "index.html")))
+        app = web.Application(middlewares=[no_cache])
+        app.router.add_get("/", lambda r: web.HTTPFound("/static/byte3d.html"))   # the 3D overlay (index.html is the old 2D one)
         app.router.add_get("/control", lambda r: web.FileResponse(os.path.join(OVERLAY, "control.html")))
         app.router.add_get("/ws", self.ws_handler)
         app.router.add_get("/memory", lambda r: web.json_response(self.memory.data))
@@ -351,27 +446,30 @@ class Sidekick:
 
         self.lm_status = await self.brain.check()
         log.info(self.lm_status)
-        log.info("OBS Browser Source:  http://localhost:%d   (width 400, height 400)", port)
+        log.info("OBS Browser Source:  local file overlay\\loader.html, or http://localhost:%d/static/byte3d.html "
+                 "(width 400, height 400)", port)
         log.info("Control panel:       http://localhost:%d/control", port)
 
-        tasks = [asyncio.create_task(self.director()),
-                 asyncio.create_task(self.memory.maintain(self.brain, lambda: not self.busy and not self.jobs)),
-                 asyncio.create_task(self.features.run())]
+        tasks = [self.supervise("Director", self.director),
+                 self.supervise("Memory", lambda: self.memory.maintain(
+                     self.brain, lambda: not self.busy and not self.jobs and not self.alerts)),
+                 self.supervise("Features", self.features.run),
+                 self.supervise("LM Studio check", self.watch_lm)]
         src = self.cfg["chat"].get("source", "streamerbot")
         use_sb_actions = bool(self.cfg["streamerbot"].get("url"))
         if src == "streamerbot" or use_sb_actions:
             self.sb = StreamerBot(self.cfg, session)
             self.sb.on_event = self.features.on_sb_event   # raids, subs, cheers, follows, OBS scenes
-            tasks.append(asyncio.create_task(
-                self.sb.run(on_chat=self.on_chat if src == "streamerbot" else None, on_status=self.push_status)))
+            tasks.append(self.supervise("Streamer.bot", lambda: self.sb.run(
+                on_chat=self.on_chat if src == "streamerbot" else None, on_status=self.push_status)))
         if src == "twitch":
-            tasks.append(asyncio.create_task(twitch_chat(self.cfg["chat"]["twitch_channel"], self.on_chat)))
+            tasks.append(self.supervise("Twitch chat", lambda: twitch_chat(self.cfg["chat"]["twitch_channel"], self.on_chat)))
         if self.cfg["listen"].get("enabled"):
             from listen import Listener
             Listener(self.cfg, lambda t: self.on_streamer(t, spoken=True),
                      lambda: self.busy and not self.features.cfg["quiet"].get("listen_while_talking", True)).start(
                 asyncio.get_running_loop())
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)   # the jobs are supervised, so this only ends on shutdown
 
 
 LOG_BUFFER = collections.deque(maxlen=200)
@@ -397,24 +495,49 @@ def main():
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
     fmt = logging.Formatter("%(asctime)s  %(message)s", "%H:%M:%S")
+    for stream in (sys.stdout, sys.stderr):
+        try:   # a chat name or a curly quote the console can't show becomes "?" instead of dropping the whole line
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
     console = logging.StreamHandler()
     console.setFormatter(fmt)
+    # sidekick.log is written by Python itself (UTF-8, rotated at midnight, 7 days kept), so it survives a window close
+    logfile = logging.handlers.TimedRotatingFileHandler(os.path.join(BASE, "sidekick.log"), when="midnight",
+                                                        backupCount=7, encoding="utf-8")
+    logfile.setFormatter(fmt)
     panel = ControlLogHandler()
     panel.setFormatter(fmt)
-    logging.basicConfig(level=logging.INFO, handlers=[console, panel])
+    logging.basicConfig(level=logging.INFO, handlers=[console, logfile, panel])
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
     sk = None
+    stop = {}   # the loop and the main task, so a Ctrl+C / Ctrl+Break handler can ask the loop to stop
+
+    def on_stop_signal(signum, frame):
+        # Ctrl+C or Ctrl+Break (Windows): cancel the main task so the save below still runs
+        if "loop" in stop:
+            stop["loop"].call_soon_threadsafe(stop["task"].cancel)
 
     async def start():
         nonlocal sk
+        stop["loop"], stop["task"] = asyncio.get_running_loop(), asyncio.current_task()
+        signal.signal(signal.SIGINT, on_stop_signal)
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, on_stop_signal)
         sk = Sidekick(cfg)
         panel.sidekick = sk
-        await sk.run()
+        try:
+            await sk.run()
+        except asyncio.CancelledError:
+            log.info("Stopping: saving memory and features")
+            sk.memory.save()
+            sk.features.save()
+            raise
 
     try:
         asyncio.run(start())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
         if sk:

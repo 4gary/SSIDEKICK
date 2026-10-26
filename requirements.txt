@@ -1,3 +1,5 @@
 aiohttp>=3.9
-comtypes; sys_platform == "win32"
 numpy
+comtypes; sys_platform == "win32"
+faster-whisper
+sounddevice
