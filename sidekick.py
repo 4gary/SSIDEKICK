@@ -15,6 +15,7 @@ import sys
 import time
 import tomllib
 import uuid
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -28,6 +29,13 @@ from tts import TTS, wav_seconds
 BASE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(BASE, "overlay")
 log = logging.getLogger("sidekick")
+
+
+def foreign_origin(request):
+    """True when a web page from another site is calling us. Browsers say so in the Origin header; Streamer.bot,
+    curl and the OBS overlay (which is served by this app) either send no Origin or send localhost."""
+    origin = request.headers.get("Origin")
+    return bool(origin) and (urlsplit(origin).hostname or "") not in ("localhost", "127.0.0.1")
 
 
 def deep_merge(dst, src):
@@ -285,6 +293,8 @@ class Sidekick:
             await asyncio.sleep(5)
 
     async def ws_handler(self, request):
+        if foreign_origin(request):
+            return web.Response(status=403, text="forbidden: this page is not from this PC")
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
         role = None
@@ -349,6 +359,8 @@ class Sidekick:
 
     async def api(self, request):
         """GET or POST /api/{event|say|streamer|chat}?text=...  (handy for Streamer.bot 'Fetch URL')."""
+        if foreign_origin(request):
+            return web.json_response({"ok": False, "error": "forbidden"}, status=403)
         params = dict(request.query)
         if request.method == "POST" and request.can_read_body:
             try:
