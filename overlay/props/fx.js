@@ -57,7 +57,7 @@ function disposeTree(obj, keep) {
 }
 
 // Limits the GPU upload of an instanced attribute to its first n instances; the rest of the pool is not in use.
-function useRange(attr, n) { attr.updateRange.offset = 0; attr.updateRange.count = n * attr.itemSize; attr.needsUpdate = true; }
+function useRange(attr, n) { attr.clearUpdateRanges(); attr.addUpdateRange(0, n * attr.itemSize); attr.needsUpdate = true; }
 
 // Canvas rounded-rectangle path
 function rr(g, x, y, w, h, r) {
