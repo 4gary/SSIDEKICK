@@ -48,7 +48,8 @@ Nothing goes to the cloud. Chat goes through Streamer.bot, the thinking happens 
 
 ## 4. OBS
 
-1. Add a **Browser Source**. URL `http://localhost:7777`, width `400`, height `400`.
+1. Add a **Browser Source**. Tick **Local file** and pick `overlay\loader.html` in Gary's folder (it waits until Gary is running, then shows him). Width `400`, height `400`.
+   Or, instead of a local file, use the URL `http://localhost:7777/static/byte3d.html`.
 2. Tick **Control audio via OBS**. The voice now shows up as its own audio source in the mixer, so it goes to stream and you can set its volume.
    Right-click it in the mixer → *Advanced Audio Properties* → set Audio Monitoring to *Monitor and Output* so you hear it too.
 3. Drag it into a corner.

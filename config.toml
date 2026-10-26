@@ -81,4 +81,4 @@ facts_per_person = 8          # how many facts about each person go into a reply
 past_streams = 3              # how many past stream summaries it remembers
 
 [server]
-port = 7777                   # overlay: http://localhost:7777   control panel: http://localhost:7777/control
+port = 7777                   # overlay: local file overlay\loader.html (or http://localhost:7777/static/byte3d.html)   control panel: http://localhost:7777/control

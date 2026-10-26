@@ -217,8 +217,8 @@ class Sidekick:
         except Exception as e:
             log.error("TTS failed (showing text only): %s", e)
         if not self.overlays:
-            log.warning("No overlay connected, so nobody hears this. Add http://localhost:%d as an OBS Browser Source.",
-                        self.cfg["server"]["port"])
+            log.warning("No overlay connected, so nobody hears this. Add the OBS Browser Source: local file "
+                        "overlay\\loader.html (see README, OBS section).")
         self.done.clear()
         self.spoke_until = time.monotonic() + secs + 3   # the mic can hear the speakers for a few seconds after
         await self.send_overlays({"type": "say", "text": text, "audio": url, "seconds": secs})
@@ -390,7 +390,7 @@ class Sidekick:
         port = self.cfg["server"]["port"]
 
         app = web.Application()
-        app.router.add_get("/", lambda r: web.FileResponse(os.path.join(OVERLAY, "index.html")))
+        app.router.add_get("/", lambda r: web.HTTPFound("/static/byte3d.html"))   # the 3D overlay (index.html is the old 2D one)
         app.router.add_get("/control", lambda r: web.FileResponse(os.path.join(OVERLAY, "control.html")))
         app.router.add_get("/ws", self.ws_handler)
         app.router.add_get("/memory", lambda r: web.json_response(self.memory.data))
@@ -404,7 +404,8 @@ class Sidekick:
 
         self.lm_status = await self.brain.check()
         log.info(self.lm_status)
-        log.info("OBS Browser Source:  http://localhost:%d   (width 400, height 400)", port)
+        log.info("OBS Browser Source:  local file overlay\\loader.html, or http://localhost:%d/static/byte3d.html "
+                 "(width 400, height 400)", port)
         log.info("Control panel:       http://localhost:%d/control", port)
 
         tasks = [self.supervise("Director", self.director),
