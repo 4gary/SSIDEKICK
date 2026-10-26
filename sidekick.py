@@ -5,6 +5,7 @@ Run:  python sidekick.py
 """
 import asyncio
 import collections
+import copy
 import json
 import logging
 import os
@@ -27,6 +28,16 @@ from tts import TTS, wav_seconds
 BASE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(BASE, "overlay")
 log = logging.getLogger("sidekick")
+
+
+def deep_merge(dst, src):
+    """Copies src into dst. Dicts merge key by key (so home.x doesn't wipe home.z); anything else is replaced."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
 
 
 class Sidekick:
@@ -54,9 +65,12 @@ class Sidekick:
         self.ignore = {u.lower() for u in cfg["chat"].get("ignore_users", [])}
         self.tts = TTS(cfg, BASE)
         self.memory = Memory(cfg, BASE)
-        self.avatar = dict(cfg.get("avatar", {}))   # 3D avatar movement settings, relayed to overlays
+        self.avatar = copy.deepcopy(cfg.get("avatar", {}))   # 3D avatar movement settings, relayed to overlays
         self.sb = None
         self.features = Features(self)   # games, races, voice effects, greetings... (features.py)
+        saved = getattr(self.features, "saved_avatar", None)   # avatar settings kept across restarts, if features.py has them
+        if isinstance(saved, dict):
+            deep_merge(self.avatar, {k: v for k, v in saved.items() if k != "do"})
 
     # ------------------------------------------------------------ inputs
 
@@ -240,6 +254,13 @@ class Sidekick:
     async def push_status(self):
         await self.send_controls(self.status())
 
+    def store_avatar(self, change):
+        """Keeps the avatar settings. A "do" is a one-shot reaction: it is relayed by the caller, never stored."""
+        deep_merge(self.avatar, {k: v for k, v in change.items() if k != "do"})
+        f = getattr(self.features, "on_avatar_set", None)   # features.py saves these across restarts
+        if f:
+            f(self.avatar)
+
     async def watch_lm(self):
         """LM Studio is often started after Gary. Until it answers, look again every 30 s and update the panel."""
         while True:
@@ -308,7 +329,10 @@ class Sidekick:
                     self.done.set()
                 elif t == "avatar":
                     change = msg.get("set") or {}
-                    self.avatar.update(change)
+                    acts = change.get("acts")
+                    if isinstance(acts, dict) and "scene" in acts and "sceneAt" not in acts:
+                        acts["sceneAt"] = int(time.time() * 1000)   # when the scene was picked, so an old pick isn't replayed
+                    self.store_avatar(change)
                     await self.send_overlays({"type": "avatar", "set": change})
                     await self.push_status()
                 elif t == "refresh":
