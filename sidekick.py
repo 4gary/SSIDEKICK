@@ -134,7 +134,12 @@ class Sidekick:
         idle = self.beh.get("idle_seconds", 0)
         while True:
             await asyncio.sleep(0.3)
-            if self.paused or self.busy:
+            if self.paused:
+                # nothing queued during a pause is spoken after Resume: stale chat, alerts or "say" lines are dropped
+                self.jobs.clear(); self.alerts.clear()
+                self.want_chat, self.want_interject = False, None
+                continue
+            if self.busy:
                 continue
             now = time.monotonic()
             if now - self.last_spoke < self.beh["min_gap_seconds"]:
@@ -331,8 +336,12 @@ class Sidekick:
                 elif t == "idle_now":
                     self.jobs.append(("idle", None, None))
                 elif t == "pause":
-                    self.paused = not self.paused
-                    log.info("Paused" if self.paused else "Resumed")
+                    # "paused": true/false sets it outright (a stale page can't flip it the wrong way); otherwise it toggles
+                    self.paused = bool(msg["paused"]) if "paused" in msg else not self.paused
+                    if self.paused:
+                        self.jobs.clear(); self.alerts.clear()
+                        self.want_chat, self.want_interject = False, None
+                    log.info("Paused: queued lines dropped" if self.paused else "Resumed")
                     await self.push_status()
                 elif t == "skip":
                     await self.send_overlays({"type": "stop"})
