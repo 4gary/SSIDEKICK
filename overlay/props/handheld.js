@@ -5,31 +5,12 @@
 // Module-level helpers are shared. Every build call makes its own geometry, materials and canvases
 // (through kit), so dispose() on one item never touches another.
 
+import { clamp, easeInOut, rbox } from './common.js';
+// rbox keeps BoxGeometry's six face groups, so a material array maps per face: +x, -x, +y, -y, +z, -z.
+
 const FONT = '"Segoe UI", sans-serif';
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const easeInOut = (x) => 0.5 - 0.5 * Math.cos(Math.PI * clamp(x, 0, 1));
 const stepDt = (dt) => clamp(dt || 1 / 60, 0, 0.1);
 const num = (v, d = 0) => (typeof v === "number" && isFinite(v) ? v : d);
-
-// Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r).
-// Keeps the per-face groups, so a material array maps per face: +x, -x, +y, -y, +z, -z.
-function rbox(THREE, w, h, d, r, seg = 6) {
-  const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-  const hx = w / 2, hy = h / 2, hz = d / 2;
-  const rr = Math.min(r, hx, hy, hz);
-  const ax = hx - rr, ay = hy - rr, az = hz - rr;
-  const P = g.attributes.position, N = g.attributes.normal;
-  const n = new THREE.Vector3();
-  for (let i = 0; i < P.count; i++) {
-    const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-    const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-    n.set(x - qx, y - qy, z - qz).normalize();
-    P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-    N.setXYZ(i, n.x, n.y, n.z);
-  }
-  P.needsUpdate = true; N.needsUpdate = true;
-  return g;
-}
 
 // Per-item resource kit: everything built through it is freed by dispose().
 function kit(THREE, ctx) {
@@ -105,10 +86,10 @@ export function buildBook(THREE, ctx) {
   const pageMat = K.mat({ map: pageTex, roughness: 0.9 });
 
   // Board slab (the cover art is on its +z face), spine, and the two page blocks (-z face = pages)
-  mesh(K.geo(rbox(THREE, 0.56, 0.36, 0.012, 0.008)), [boardMat, boardMat, boardMat, boardMat, coverMat, boardMat], root, [0, 0.18, 0.006]);
+  mesh(K.geo(rbox(THREE, 0.56, 0.36, 0.012, 0.008, 6)), [boardMat, boardMat, boardMat, boardMat, coverMat, boardMat], root, [0, 0.18, 0.006]);
   // spine: front face at z 0.01, 2 mm behind the cover (the board's front is at 0.012), so they do not z-fight
-  mesh(K.geo(rbox(THREE, 0.03, 0.36, 0.045, 0.012)), boardMat, root, [0, 0.18, -0.0125]);
-  const blockGeo = K.geo(rbox(THREE, 0.25, 0.32, 0.045, 0.006));
+  mesh(K.geo(rbox(THREE, 0.03, 0.36, 0.045, 0.012, 6)), boardMat, root, [0, 0.18, -0.0125]);
+  const blockGeo = K.geo(rbox(THREE, 0.25, 0.32, 0.045, 0.006, 6));
   for (const s of [-1, 1]) mesh(blockGeo, [edgeMat, edgeMat, edgeMat, edgeMat, edgeMat, pageMat], root, [s * 0.155, 0.18, -0.0225]);
 
   // Flipping page: pivots on the spine, sits on the right block at rest
@@ -328,7 +309,7 @@ export function buildChips(THREE, ctx) {
   const sealMat = K.mat({ color: 0xd6402b, roughness: 0.5 });
 
   mesh(K.geo(rbox(THREE, 0.18, 0.2, 0.05, 0.035, 8)), [bagMat, bagMat, bagMat, bagMat, labelMat, bagMat], root, [0, 0.1, 0]);
-  mesh(K.geo(rbox(THREE, 0.19, 0.035, 0.065, 0.014)), sealMat, root, [0, 0.2, 0]); // crimped top
+  mesh(K.geo(rbox(THREE, 0.19, 0.035, 0.065, 0.014, 6)), sealMat, root, [0, 0.2, 0]); // crimped top
 
   // Chips poking out of the mouth: [x, y, z, rx, ry, rz]
   const CHIPS = [
@@ -516,8 +497,8 @@ export function buildNotepad(THREE, ctx) {
   const coverMat = K.mat({ color: 0x2ec4b6, roughness: 0.6 });
   const paperMat = K.mat({ color: 0xfffdf6, roughness: 0.9 });
   const frontMat = K.mat({ map: noteTex, roughness: 0.9 });
-  mesh(K.geo(rbox(THREE, 0.15, 0.21, 0.02, 0.01)), [paperMat, paperMat, paperMat, paperMat, frontMat, paperMat], root, [0, 0, 0.01]);
-  mesh(K.geo(rbox(THREE, 0.16, 0.22, 0.012, 0.014)), coverMat, root, [0, 0, -0.006]);
+  mesh(K.geo(rbox(THREE, 0.15, 0.21, 0.02, 0.01, 6)), [paperMat, paperMat, paperMat, paperMat, frontMat, paperMat], root, [0, 0, 0.01]);
+  mesh(K.geo(rbox(THREE, 0.16, 0.22, 0.012, 0.014, 6)), coverMat, root, [0, 0, -0.006]);
 
   // spiral coil: rings around the x axis along the top edge
   const coilMat = K.mat({ color: 0xc9ced6, roughness: 0.3, metalness: 0.6 });

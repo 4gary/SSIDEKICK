@@ -13,8 +13,9 @@
 // Preview wrappers (fire one burst on the first update, for _pshot): previewConfetti, previewCoins,
 //   previewFireworks, previewShockwave, previewHearts.
 
+import { clamp, disposeTree, rbox, rr } from './common.js';
+
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -23,48 +24,8 @@ const FONT = (px) => `bold ${px}px "Segoe UI", sans-serif`;
 const vec3 = (p) =>
   Array.isArray(p) ? [num(p[0], 0), num(p[1], 0), num(p[2], 0)] : [num(p && p.x, 0), num(p && p.y, 0), num(p && p.z, 0)];
 
-// Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r). Same as couch.js.
-function rbox(THREE, w, h, d, r, seg = 12, bottomOrigin = false) {
-  const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-  const hx = w / 2, hy = h / 2, hz = d / 2;
-  const rr = Math.min(r, hx, hy, hz);
-  const ax = hx - rr, ay = hy - rr, az = hz - rr;
-  const P = g.attributes.position, N = g.attributes.normal;
-  const n = new THREE.Vector3();
-  for (let i = 0; i < P.count; i++) {
-    const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-    const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-    n.set(x - qx, y - qy, z - qz).normalize();
-    P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-    N.setXYZ(i, n.x, n.y, n.z);
-  }
-  P.needsUpdate = true; N.needsUpdate = true;
-  if (bottomOrigin) g.translate(0, hy, 0);
-  return g;
-}
-
-// Dispose everything under obj. `keep` is a shared geometry (ctx.sphere) that must not be freed.
-function disposeTree(obj, keep) {
-  obj.traverse((o) => {
-    if (o.geometry && o.geometry !== keep) o.geometry.dispose();
-    if (o.material) {
-      for (const m of [].concat(o.material)) {
-        if (m.map) m.map.dispose();
-        m.dispose();
-      }
-    }
-  });
-}
-
 // Limits the GPU upload of an instanced attribute to its first n instances; the rest of the pool is not in use.
 function useRange(attr, n) { attr.clearUpdateRanges(); attr.addUpdateRange(0, n * attr.itemSize); attr.needsUpdate = true; }
-
-// Canvas rounded-rectangle path
-function rr(g, x, y, w, h, r) {
-  g.beginPath(); g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
-}
 
 // Soft white radial glow (used as an additive sprite map)
 function glowDraw(g, w, h) {

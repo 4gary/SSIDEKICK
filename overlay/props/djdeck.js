@@ -2,6 +2,8 @@
 // an emissive equaliser front panel and a row of LEDs. Also exports DJ headphones.
 // Units: Gary is ~2.5 tall, table top at y 0.82, FRONT faces +z.
 
+import { rr } from './common.js';
+
 const TAU = Math.PI * 2;
 const SPIN = (33 * TAU) / 60; // 33 rpm in rad/s
 
@@ -30,16 +32,6 @@ function roundedBoxGeo(THREE, w, h, d, r) {
   return g;
 }
 
-// ---- 2D helpers for the canvas textures ----
-function rr(g, x, y, w, h, r) {
-  g.beginPath();
-  g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r);
-  g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r);
-  g.arcTo(x, y, x + w, y, r);
-  g.closePath();
-}
 const TEAL = [46, 211, 192], YEL = [255, 211, 77], PINK = [255, 95, 162];
 function mix3(a, b, f) { return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]; }
 function eqColour(f) {

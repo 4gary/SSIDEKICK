@@ -3,9 +3,10 @@
 // reveals a bad crayon drawing of "dum" one stroke at a time, in a fixed order. st.flourish adds sparkles and a
 // frame shine. Gary's use spot is on the -x side of the easel, a little in front, turned toward the canvas (yaw 0.9).
 
+import { clamp, star } from './common.js';
+
 export function build(THREE, ctx) {
   const { mesh, group, canvasTex, sphere } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const CW = 512, CH = 400;
 
   const own = [];
@@ -134,15 +135,8 @@ export function build(THREE, ctx) {
     g.stroke();
   }
 
-  function star(g, x, y, r, a) {
-    g.fillStyle = '#fff6b0'; g.beginPath();
-    for (let i = 0; i < 8; i++) {
-      const rr = i % 2 ? r * 0.28 : r, aa = a + (i * Math.PI) / 4;
-      const px = x + Math.cos(aa) * rr, py = y + Math.sin(aa) * rr;
-      if (i) g.lineTo(px, py); else g.moveTo(px, py);
-    }
-    g.closePath(); g.fill();
-  }
+  // filled 8-pointed sparkle (short points at 28 % of the radius)
+  const sparkle = (g, x, y, r, a) => { g.fillStyle = '#fff6b0'; star(g, x, y, r, r * 0.28, a, 4); g.fill(); };
   const SPARKS = [[70, 70, 1], [452, 58, 0.8], [468, 300, 1.1], [44, 306, 0.7], [262, 22, 0.6]];
 
   // p: 0..1 share of strokes drawn (the last one partly); flourish: sparkles + a shine sweep
@@ -161,7 +155,7 @@ export function build(THREE, ctx) {
       grad.addColorStop(0.5, 'rgba(255,255,255,0.55)');
       grad.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = grad; g.fillRect(0, 0, CW, CH);
-      SPARKS.forEach(([x, y, s], i) => star(g, x, y, 26 * s * (0.6 + 0.4 * Math.sin(t * 4 + i * 1.7)), t * 0.8 + i));
+      SPARKS.forEach(([x, y, s], i) => sparkle(g, x, y, 26 * s * (0.6 + 0.4 * Math.sin(t * 4 + i * 1.7)), t * 0.8 + i));
     }
   }
 

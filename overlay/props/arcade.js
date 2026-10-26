@@ -1,4 +1,6 @@
 // Upright arcade cabinet "DUMSTREAM" (cartoon style). Front faces +z, origin on the floor at the centre.
+import { star } from './common.js';
+
 export function build(THREE, ctx) {
   const PI = Math.PI;
   const root = new THREE.Group();
@@ -32,14 +34,6 @@ export function build(THREE, ctx) {
   function rrClip(g, w, h, r) {
     g.beginPath(); g.moveTo(r, 0); g.arcTo(w, 0, w, h, r); g.arcTo(w, h, 0, h, r); g.arcTo(0, h, 0, 0, r); g.arcTo(0, 0, w, 0, r);
     g.closePath(); g.clip();
-  }
-  function star(g, cx, cy, R, r) {
-    g.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = -PI / 2 + (i * PI) / 5, rad = i % 2 ? r : R;
-      g.lineTo(cx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
-    }
-    g.closePath();
   }
   // right side: red/navy/yellow diagonal stripes, navy band with stars
   function artRight(g, w, h) {
@@ -338,7 +332,7 @@ export function build(THREE, ctx) {
     },
     dispose() {
       root.traverse((o) => {
-        if (o.geometry) o.geometry.dispose();
+        if (o.geometry && o.geometry !== ctx.sphere) o.geometry.dispose();   // ctx.sphere is shared (the joystick ball)
         if (o.material) {
           const mats = Array.isArray(o.material) ? o.material : [o.material];
           for (const m of mats) { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); }
