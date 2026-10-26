@@ -11,6 +11,7 @@ Settings live in features.toml. Long-term stats live in features_data.json (plai
 while Gary is off).
 """
 import asyncio
+import copy
 import datetime
 import json
 import logging
@@ -42,10 +43,10 @@ DEFAULTS = {
              "winner_chat_pattern": ""},
     "clips": {"keyword": "clip"},
     # OBS scene name (regex, lowercase) -> Gary's stream mode on the overlay. First match wins.
-    "scene_modes": {"ending": r"\b(ending|outro|end screen|that'?s the show|goodbye)\b", "starting": r"\b(starting|soon|intro)\b",
-                    "brb": r"\b(brb|be right back|break|away)\b", "marble": r"marble", "party": r"\b(party|disco|dance)\b",
-                    "chill": r"\b(chill|lofi|cozy)\b", "gaming": r"\b(game|gaming|gameplay)\b",
-                    "chatting": r"\b(chat|chatting|camera|cam|talk)\b"},
+    "scene_modes": {"marble": r"marble", "ending": r"\b(ending|outro|end screen|that'?s the show|goodbye)\b",
+                    "starting": r"\b(starting|soon|intro)\b", "brb": r"\b(brb|be right back|break|away)\b",
+                    "party": r"\b(party|disco|dance)\b", "chill": r"\b(chill|lofi|cozy)\b",
+                    "gaming": r"\b(games?|gaming|gameplay)\b", "chatting": r"\b(chat|chatting|camera|cam|talk)\b"},
     "crowd": {"hype": True, "hype_messages": 6, "hype_people": 4, "rip": True, "rip_messages": 4, "window_seconds": 10,
               "cooldown_seconds": 120},
     "effects": {"enabled": True, "prefix": "FX", "seconds": {"acid": 30, "drunk": 30, "turn off": 30},
@@ -61,6 +62,10 @@ DEFAULTS = {
 
 def _today():
     return datetime.date.today().isoformat()
+
+
+def _yesterday():
+    return (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
 
 def _norm(s):
@@ -172,8 +177,11 @@ class Features:
         self.mute_until = 0.0       # Gary stays quiet until then (inf = until told)
         self.away = None            # {"mode": mode to go back to, "next": time of next idle activity} while sent away
         self.held = None            # (time, line) Gary got cut off on, for "go ahead"
-        if self.state.get("avatar"):
-            sk.avatar.update(self.state["avatar"])   # where he was told to stand last time ("Gary, stay at the bottom")
+        # where he was told to stand, and the control page settings: sidekick.py deep-merges saved_avatar on startup
+        saved = {k: copy.deepcopy(v) for k, v in (self.state.get("avatar") or {}).items() if k != "do"}
+        self.saved_avatar = saved or None
+        if saved:
+            sk.avatar.update(saved)                   # ("Gary, stay at the bottom" is remembered too)
         pat = self.cfg["race"].get("winner_chat_pattern")
         self.winner_re = re.compile(pat, re.I) if pat else None
 
@@ -260,6 +268,8 @@ class Features:
     def log_event(self, text):
         today = self.state["today"]
         if today.get("date") != _today():
+            if today.get("date"):
+                self.state["yesterday"] = {"date": today["date"], "events": today.get("events", [])}
             today.update(date=_today(), events=[])
         today["events"].append(f"{datetime.datetime.now():%H:%M} {text}")
         del today["events"][:-80]
@@ -474,9 +484,9 @@ class Features:
     async def go_away(self):
         """Sent away: stays on screen doing idle activities (props need wander/roam, so switch for the break)."""
         if self.away is None:
-            self.away = {"mode": None}
+            self.away = {"mode": None, "set": None}
             if self.sk.avatar.get("mode") in ("stay", "walkon"):
-                self.away["mode"] = self.sk.avatar["mode"]
+                self.away.update(mode=self.sk.avatar["mode"], set="wander")
                 await self.set_avatar({"mode": "wander"})
         self.away["next"] = time.monotonic() + 100
         name = random.choice(self.cfg["quiet"].get("away_activities") or ["phone"])
@@ -487,15 +497,23 @@ class Features:
         self.sk.avatar.update(change)
         await self.sk.send_overlays({"type": "avatar", "set": change})
         if remember:
-            self.state["avatar"] = {k: self.sk.avatar[k] for k in ("mode", "home") if k in self.sk.avatar}
+            self.state["avatar"] = {**(self.state.get("avatar") or {}), **{k: self.sk.avatar[k] for k in ("mode", "home") if k in self.sk.avatar}}
             self.dirty = True
+
+    def on_avatar_set(self, avatar):
+        """The control page changed Gary's settings: keep them for the next start. One-shot "do" events are not kept."""
+        if not isinstance(avatar, dict):
+            return
+        keep = copy.deepcopy({k: v for k, v in avatar.items() if k != "do"})
+        self.state["avatar"] = {**(self.state.get("avatar") or {}), **keep}
+        self.dirty = True
 
     def unmute(self, say=False):
         self.mute_until = 0.0
         if self.away is not None:
-            prev, self.away = self.away.get("mode"), None
+            prev, set_to, self.away = self.away.get("mode"), self.away.get("set"), None
             asyncio.create_task(self.sk.send_overlays({"type": "avatar", "set": {"do": {"name": "stop", "at": int(time.time() * 1000)}}}))
-            if prev and prev != self.sk.avatar.get("mode"):
+            if prev and self.sk.avatar.get("mode") == set_to:     # only if nothing moved him during the break
                 asyncio.create_task(self.set_avatar({"mode": prev}))
         self.sk.jobs.clear()          # anything that piled up is old news now
         self.sk.want_chat, self.sk.want_interject = False, None
@@ -538,8 +556,8 @@ class Features:
                 await self.end_poll()
                 return True
             if re.search(start, c) or re.search(r"\bpoll( time|:)", c):
-                rest = re.split(r"\bpoll\b[:,]?\s*", c, maxsplit=1)[-1]
-                await self.start_poll_from_words(re.sub(r"^(about|on|for|asking)\s+", "", rest).strip())
+                rest = re.split(r"\bpoll\b[:,]?\s*", raw, maxsplit=1, flags=re.I)[-1]
+                await self.start_poll_from_words(re.sub(r"^(about|on|for|asking)\s+", "", rest, flags=re.I).strip())
                 return True
         if re.search(r"\btrivia\b", c) and (re.search(r"\b(start|run|host|do|begin|new|another)\b.{0,12}\btrivia\b|"
                                                   r"\btrivia (time|about|questions about)\b|\b(end|stop|cancel|enough)\b", c)):
@@ -565,8 +583,8 @@ class Features:
                 await self.lock_predict()
                 return True
             if re.search(start, c) or re.search(r"\bpredictions?( time|:)", c):
-                rest = re.split(r"\bpredictions?\b[:,]?\s*", c, maxsplit=1)[-1]
-                await self.start_predict_from_words(re.sub(r"^(about|on|for)\s+", "", rest).strip())
+                rest = re.split(r"\bpredictions?\b[:,]?\s*", raw, maxsplit=1, flags=re.I)[-1]
+                await self.start_predict_from_words(re.sub(r"^(about|on|for)\s+", "", rest, flags=re.I).strip())
                 return True
         if self.predict and not self.predict.get("race") and self.predict.get("options") \
                 and re.search(r"\b(won|wins|win|winner|answer|result|correct|it was|it's|it is)\b", c):
@@ -623,7 +641,7 @@ class Features:
                 await self.end_poll()
             elif g("options"):
                 await self.open_poll(g("question", "Chat decides"), self.split_options(g("options")),
-                                     int(g("seconds", 0) or 0) or None)
+                                     _int(g("seconds")) or None)
             else:
                 await self.start_poll_from_words(g("question") or g("topic"))
         elif kind == "trivia":
@@ -631,10 +649,11 @@ class Features:
                 self.trivia = None
                 await self.broadcast()
             else:
-                await self.start_trivia(g("topic"), int(g("rounds", 0) or 0) or None)
+                await self.start_trivia(g("topic"), _int(g("rounds")) or None)
         elif kind == "predict":
-            if g("resolve"):
-                await self.resolve_predict(g("resolve"))
+            if "resolve" in p:          # a blank resolve does nothing (never starts a new prediction)
+                if g("resolve"):
+                    await self.resolve_predict(g("resolve"))
             elif g("cancel"):
                 self.predict = None
                 await self.broadcast()
@@ -643,9 +662,9 @@ class Features:
             else:
                 await self.start_predict_from_words(g("question"), self.split_options(g("options")) or None)
         elif kind in ("raid", "sub", "resub", "gift", "giftbomb", "cheer", "follow"):
-            await self.stream_event(kind, g("user", "someone"), viewers=int(g("viewers", 0) or 0),
-                                    months=int(g("months", 0) or 0), count=int(g("count", 0) or 0),
-                                    bits=int(g("bits", 0) or 0), game=g("game"), tier=g("tier"),
+            await self.stream_event(kind, g("user", "someone"), viewers=_int(g("viewers")),
+                                    months=_int(g("months")), count=_int(g("count")),
+                                    bits=_int(g("bits")), game=g("game"), tier=g("tier"),
                                     recipient=g("recipient"))
         elif kind == "clip":
             await self.clip()
@@ -658,10 +677,11 @@ class Features:
         elif kind == "voice":     # buttons/docks: always a request, so phrase it as one
             await self.voice_command(f"please {g('effect', 'random').lower()} voice")
         elif kind == "do":          # test the overlay's event animations: /api/do?name=raid&who=Bob&n=50
-            await self.avatar_do(g("name", "hype"), g("who", "TestUser"), n=int(g("n", 0) or 0),
-                                 months=int(g("months", 0) or 0), title=g("title"))
+            await self.avatar_do(g("name", "hype"), g("who", "TestUser"), n=_int(g("n")),
+                                 months=_int(g("months")), title=g("title"))
         elif kind == "fx":
-            await self.fx_command(f"please {g('effect').lower()}")
+            if not await self.fx_command(f"please {g('effect').lower()}"):
+                return {"ok": False, "reason": f"no effect matches '{g('effect')}'"}
         elif kind == "leaderboard":
             self.announce_leaderboard()
         elif kind == "features":
@@ -832,7 +852,7 @@ class Features:
             if home != av.get("home"):
                 change["home"] = home
         av.update(change)
-        self.state["avatar"] = {k: av[k] for k in ("mode", "home") if k in av}
+        self.state["avatar"] = {**(self.state.get("avatar") or {}), **{k: av[k] for k in ("mode", "home") if k in av}}
         self.dirty = True
         await self.sk.send_overlays({"type": "avatar", "set": change})
         await self.sk.push_status()
@@ -955,7 +975,7 @@ class Features:
 
     @staticmethod
     def split_options(s):
-        parts = [x.strip(" ?.!") for x in re.split(r"\||,|\bor\b", s or "") if x.strip(" ?.!")]
+        parts = [x.strip(" ?.!") for x in re.split(r"\||,|\bor\b", s or "", flags=re.I) if x.strip(" ?.!")]
         return parts[:6] if len(parts) >= 2 else []
 
     async def start_poll_from_words(self, words):
@@ -1291,8 +1311,9 @@ class Features:
             title = _first(reward, ("title", "name")) or _first(data, ("rewardName", "reward_title", "title")) or "a redeem"
             await self.avatar_do("redeem", user, title=title)
             now = time.monotonic()
-            if self.cfg["events"].get("redeems", True) and now - self.recent.get("redeem_said", -999) > 30:
-                self.recent["redeem_said"] = now
+            said_key = f"redeem_said_{user.lower()}"
+            if self.cfg["events"].get("redeems", True) and now - self.recent.get(said_key, -999) > 30:
+                self.recent[said_key] = now
                 self.alert_task(f'{user} just redeemed "{title}" with channel points. React to it by name in one sentence.')
             return
         kind = {"Raid": "raid", "Sub": "sub", "ReSub": "resub", "GiftSub": "gift", "GiftBomb": "giftbomb",
@@ -1406,28 +1427,29 @@ class Features:
 
     async def recap(self):
         await self.sk.send_overlays({"type": "thinking"})
-        path = os.path.join(self.sk.memory.log_dir, _today() + ".jsonl")
         chatters, lines = {}, []
-        try:
-            with open(path, encoding="utf-8") as f:
-                for row in f:
-                    try:
-                        e = json.loads(row)
-                    except json.JSONDecodeError:
-                        continue
-                    if e.get("kind") == "chat":
-                        chatters[e["who"]] = chatters.get(e["who"], 0) + 1
-                    lines.append(f"{e.get('who')}: {e.get('text')}")
-        except OSError:
-            pass
+        for day in (_yesterday(), _today()):          # the last two days
+            try:
+                with open(os.path.join(self.sk.memory.log_dir, day + ".jsonl"), encoding="utf-8") as f:
+                    for row in f:
+                        try:
+                            e = json.loads(row)
+                        except json.JSONDecodeError:
+                            continue
+                        if e.get("kind") == "chat":
+                            chatters[e["who"]] = chatters.get(e["who"], 0) + 1
+                        lines.append(f"{e.get('who')}: {e.get('text')}")
+            except OSError:
+                pass
         top = sorted(chatters.items(), key=lambda kv: -kv[1])[:5]
         today = next((s for s in self.sk.memory.data.get("streams", []) if s.get("date") == _today()), None)
-        events = self.state["today"]["events"] if self.state["today"].get("date") == _today() else []
+        events = [e for d in (self.state.get("yesterday"), self.state["today"])
+                  if d and d.get("date") in (_yesterday(), _today()) for e in d.get("events", [])]
         facts = []
         if today:
             facts.append("Notes on today's stream: " + today["summary"])
         if events:
-            facts.append("What happened today: " + "; ".join(e.split(" ", 1)[1] for e in events[-30:]))
+            facts.append("What happened in the last two days: " + "; ".join(e.split(" ", 1)[1] for e in events[-30:]))
         if top:
             facts.append("Most active chatters: " + ", ".join(f"{u} ({n} messages)" for u, n in top))
         board = self.leaderboard(3)
@@ -1475,7 +1497,8 @@ class Features:
             await self.sk.send_overlays({"type": "avatar", "set": {"acts": acts}})
             await self.sk.push_status()
             log.info("Gary's stream mode: %s", mode)
-        role = next(((k, v) for k, v in self.cfg.get("roles", {}).items() if k.lower() in low), None)
+        role = next(((k, v) for k, v in self.cfg.get("roles", {}).items()
+                     if re.search(rf"\b{re.escape(k.lower())}\b", low)), None)
         if role and (not self.role or self.role[0] != role[0]):
             self.role = role
             self.log_event(f"Gary did the {role[0]} segment")
