@@ -34,15 +34,27 @@ class Memory:
         self.force_extract = False
         self.retry_after = 0.0
         self.failures = 0
+        self.dirty = False             # memory.json has changes that are not saved yet
+        self.log_buf = []              # (file, line) pairs for the jsonl log, written in batches off the event loop
         if self.streamer.lower() == self.bot.lower():
             log.warning("The bot and the streamer have the same name (%s); facts about you may get mixed up", self.bot)
+        if os.path.exists(self.path + ".tmp"):
+            # left behind by a save that was killed before it finished; memory.json itself is the one that counts
+            try:
+                os.remove(self.path + ".tmp")
+                log.info("Removed a stale memory.json.tmp from an unfinished save")
+            except OSError as e:
+                log.warning("Couldn't remove memory.json.tmp (%s)", e)
         if os.path.exists(self.path):
             try:
                 with open(self.path, encoding="utf-8") as f:
                     self.data.update(json.load(f))
             except Exception as e:
                 log.error("Couldn't read memory.json (%s). Starting a fresh one, old file kept as memory.bad.json", e)
-                os.replace(self.path, self.path + f".bad-{int(time.time())}.json")
+                try:
+                    os.replace(self.path, self.path + f".bad-{int(time.time())}.json")
+                except OSError as e2:   # e.g. open in an editor: start anyway rather than refuse to run
+                    log.error("Couldn't move the bad memory.json aside (%s), starting fresh", e2)
         os.makedirs(self.log_dir, exist_ok=True)
         self.data.setdefault("lore", [])
         n_facts = sum(len(p.get("facts", [])) for p in self.data["people"].values())
@@ -54,13 +66,11 @@ class Memory:
     def record(self, who, text, kind):
         """kind: chat | streamer | bot | event"""
         entry = {"t": datetime.datetime.now().isoformat(timespec="seconds"), "kind": kind, "who": who, "text": text}
-        try:
-            with open(os.path.join(self.log_dir, _today() + ".jsonl"), "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except Exception as e:
-            log.warning("Couldn't write chat log: %s", e)
+        # written in batches by flush_log(), so the event loop never waits on the disk for each line
+        self.log_buf.append((os.path.join(self.log_dir, _today() + ".jsonl"), json.dumps(entry, ensure_ascii=False) + "\n"))
         if not self.enabled:
             return
+        self.dirty = True
         if kind == "chat":
             p = self._person(who)
             p["messages"] = p.get("messages", 0) + 1
@@ -78,16 +88,57 @@ class Memory:
             people[key] = {"name": name, "first_seen": _today(), "facts": []}
         return people[key]
 
-    def save(self):
+    def _write_lines(self, lines):
+        """Appends buffered jsonl lines to their day files. Runs in a worker thread (or inline at shutdown)."""
+        by_file = {}
+        for path, line in lines:
+            by_file.setdefault(path, []).append(line)
+        for path, texts in by_file.items():
+            try:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.writelines(texts)
+            except OSError as e:
+                log.warning("Couldn't write chat log: %s", e)
+
+    def _write_json(self, text):
+        """Writes memory.json safely: a temp file, fsync, then replace. Runs in a worker thread (or inline)."""
         tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.path)
+
+    def _take_lines(self):
+        lines, self.log_buf = self.log_buf, []
+        return lines
+
+    async def flush_log(self):
+        """Writes the buffered chat-log lines to disk without blocking the event loop."""
+        lines = self._take_lines()
+        if lines:
+            await asyncio.get_running_loop().run_in_executor(None, self._write_lines, lines)
+
+    async def save_async(self):
+        """Saves memory.json and the pending log lines. The disk work runs off the event loop."""
+        await self.flush_log()
+        text = json.dumps(self.data, ensure_ascii=False, indent=1)   # built here, where nothing else is changing it
+        self.dirty = False
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=1)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.path)
+            await asyncio.get_running_loop().run_in_executor(None, self._write_json, text)
         except OSError as e:  # e.g. memory.json open in an editor or locked by OneDrive
+            self.dirty = True
             log.warning("Couldn't save memory.json (%s), will try again next time", e)
+
+    def save(self):
+        """Blocking save, used at shutdown when the event loop is already gone."""
+        self._write_lines(self._take_lines())
+        text = json.dumps(self.data, ensure_ascii=False, indent=1)
+        try:
+            self._write_json(text)
+            self.dirty = False
+        except OSError as e:
+            log.warning("Couldn't save memory.json (%s)", e)
 
     # ------------------------------------------------------------ what goes into the prompt
 
@@ -146,11 +197,17 @@ class Memory:
     # ------------------------------------------------------------ background: learn facts, keep summaries
 
     async def maintain(self, brain, is_idle):
-        """Runs forever. When the bot is idle, mines new lines for facts and refreshes today's summary."""
+        """Runs forever. Writes the chat log every few seconds, saves memory.json once a minute if it changed,
+        and when the bot is idle, mines new lines for facts and refreshes today's summary."""
         every = self.cfg.get("learn_every_lines", 25)
+        last_save = time.monotonic()
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
+            await self.flush_log()
             now = time.monotonic()
+            if self.dirty and now - last_save >= 60:
+                last_save = now
+                await self.save_async()
             waited = now - self.last_extract
             # learn while the bot is quiet, but don't let a busy stream starve it forever
             if not self.enabled or not self.unprocessed or now < self.retry_after or (not is_idle() and waited < 180):
@@ -175,7 +232,7 @@ class Memory:
                 self.retry_after = time.monotonic() + 120
                 continue
             self.failures = 0
-            self.save()
+            self.dirty = True   # saved with the next periodic save
 
     async def _learn(self, brain, batch):
         known = {}
