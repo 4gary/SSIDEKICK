@@ -56,6 +56,9 @@ function disposeTree(obj, keep) {
   });
 }
 
+// Limits the GPU upload of an instanced attribute to its first n instances; the rest of the pool is not in use.
+function useRange(attr, n) { attr.updateRange.offset = 0; attr.updateRange.count = n * attr.itemSize; attr.needsUpdate = true; }
+
 // Canvas rounded-rectangle path
 function rr(g, x, y, w, h, r) {
   g.beginPath(); g.moveTo(x + r, y);
@@ -349,8 +352,7 @@ export function buildBanner(THREE, ctx) {
   const bob = group(root, [0, 0, 0]);   // gentle float
   const unf = group(bob, [0, 0, 0]);    // unfurl (scale x)
 
-  const tex = canvasTex(CW, CH, (g, w, h) => drawRibbon(g, w, h, 'NEW SUB: NAME!', DEFAULT_COLOR));
-  const tctx = tex.userData.ctx;
+  let tex = canvasTex(CW, CH, (g, w, h) => drawRibbon(g, w, h, 'NEW SUB: NAME!', DEFAULT_COLOR));
   const geo = new THREE.PlaneGeometry(W, H, 44, 8);
   const base = Float32Array.from(geo.attributes.position.array);
   const P = geo.attributes.position;
@@ -371,8 +373,10 @@ export function buildBanner(THREE, ctx) {
   return {
     root,
     setText(str, c) {
-      drawRibbon(tctx, CW, CH, String(str == null ? '' : str), c || DEFAULT_COLOR);
-      tex.needsUpdate = true;
+      const old = tex;
+      tex = canvasTex(CW, CH, (g, w, h) => drawRibbon(g, w, h, String(str == null ? '' : str), c || DEFAULT_COLOR));
+      mat.map = tex;
+      old.dispose();                     // the previous banner's canvas texture is no longer drawn
     },
     update(dt, t, st) {
       const s = st || {};
@@ -556,10 +560,11 @@ export function makeConfetti(THREE, ctx) {
 
   const parts = [];
   for (let i = 0; i < MAX; i++) {
-    parts.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, sx: 0, sy: 0, sz: 0,
+    parts.push({ on: false, zero: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, sx: 0, sy: 0, sz: 0,
       k: 3, sw: 1, ph: 0, amp: 0.5, age: 0, land: -1, stay: 1, s: 1 });
   }
   const E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(), M4 = new THREE.Matrix4();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0);
   let cursor = 0, hi = 0, live = 0, dirty = false;
 
   function kill(p) { if (p.on) { p.on = false; live--; } }
@@ -626,15 +631,20 @@ export function makeConfetti(THREE, ctx) {
         }
         if (p.age > 7 || (p.land >= 0 && p.s <= 0)) kill(p);
       }
-      const sc = p.on ? p.s : 0;
+      if (!p.on) {                       // dead: write its zero matrix once, then skip it
+        if (!p.zero) { p.zero = true; im.setMatrixAt(i, ZERO4); }
+        continue;
+      }
+      p.zero = false;
       E.set(p.rx, p.ry, p.rz, 'YXZ'); Q.setFromEuler(E);
-      V.set(p.x, p.y, p.z); S.set(sc, sc, sc);
+      V.set(p.x, p.y, p.z); S.set(p.s, p.s, p.s);
       M4.compose(V, Q, S);
       im.setMatrixAt(i, M4);
     }
+    while (hi > 0 && !parts[hi - 1].on) hi--;   // the high-water mark follows the highest live slot
     im.count = hi;
-    im.instanceMatrix.needsUpdate = true;
-    if (dirty && im.instanceColor) { im.instanceColor.needsUpdate = true; dirty = false; }
+    useRange(im.instanceMatrix, hi);
+    if (dirty && im.instanceColor) { useRange(im.instanceColor, hi); dirty = false; }
   }
 
   return {
@@ -689,13 +699,15 @@ export function makeCoins(THREE, ctx) {
     return im;
   };
   const bodyIM = mk(bodyGeo, bodyM), faceIM = mk(faceGeo, faceM), backIM = mk(backGeo, backM);
+  const ims = [bodyIM, faceIM, backIM];
 
   const parts = [];
   for (let i = 0; i < MAX; i++) {
-    parts.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, sy: 0, bounced: false, landed: false, land: 0, age: 0, stay: 0.8, s: 1 });
+    parts.push({ on: false, zero: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, sy: 0, bounced: false, landed: false, land: 0, age: 0, stay: 0.8, s: 1 });
   }
   const E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3();
   const M4 = new THREE.Matrix4(), T4 = new THREE.Matrix4(), F4 = new THREE.Matrix4(), B4 = new THREE.Matrix4();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0);
   let cursor = 0, hi = 0, live = 0;
 
   function kill(p) { if (p.on) { p.on = false; live--; } }
@@ -712,12 +724,14 @@ export function makeCoins(THREE, ctx) {
   }
 
   function rain(x = 0, width = 6, n = 40) {
+    n = Math.min(n, MAX);   // requests above the pool size would wrap and overwrite live coins
     for (let i = 0; i < n; i++) {
       spawn(x + rnd(-width / 2, width / 2), rnd(5.6, 6.6), rnd(-0.2, 0.2), rnd(-0.3, 0.3), -rnd(0.5, 1.5), rnd(-0.2, 0.2));
     }
   }
 
   function fountain(pos = [0, 0, 0], n = 40) {
+    n = Math.min(n, MAX);
     const [x, y, z] = vec3(pos);
     for (let i = 0; i < n; i++) {
       const a = rnd(-0.6, 0.6);
@@ -759,18 +773,20 @@ export function makeCoins(THREE, ctx) {
         }
         if (p.age > 8 || (p.landed && p.s <= 0)) kill(p);
       }
-      const sc = p.on ? p.s : 0;
+      if (!p.on) {                       // dead: zero all three matrices once, then skip it
+        if (!p.zero) { p.zero = true; bodyIM.setMatrixAt(i, ZERO4); faceIM.setMatrixAt(i, ZERO4); backIM.setMatrixAt(i, ZERO4); }
+        continue;
+      }
+      p.zero = false;
       E.set(p.rx, p.ry, 0, 'YXZ'); Q.setFromEuler(E);
-      V.set(p.x, p.y, p.z); S.set(sc, sc, sc);
+      V.set(p.x, p.y, p.z); S.set(p.s, p.s, p.s);
       M4.compose(V, Q, S);
       bodyIM.setMatrixAt(i, M4);
       T4.makeTranslation(0, 0, OFF); F4.multiplyMatrices(M4, T4); faceIM.setMatrixAt(i, F4);
       T4.makeTranslation(0, 0, -OFF); B4.multiplyMatrices(M4, T4); backIM.setMatrixAt(i, B4);
     }
-    for (const im of [bodyIM, faceIM, backIM]) {
-      im.count = hi;
-      im.instanceMatrix.needsUpdate = true;
-    }
+    while (hi > 0 && !parts[hi - 1].on) hi--;
+    for (const im of ims) { im.count = hi; useRange(im.instanceMatrix, hi); }
   }
 
   return {
@@ -842,12 +858,13 @@ export function makeFireworks(THREE, ctx) {
 
   const parts = [];
   for (let i = 0; i < MAX; i++) {
-    parts.push({ on: false, kind: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 1, size: 0.2,
+    parts.push({ on: false, zero: false, kind: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 1, size: 0.2,
       drag: 1, grav: 0, tgt: 0, emit: 0, col: WHITE, tcol: WHITE, boost: 1.3 });
   }
   const pending = [];
   const idQ = new THREE.Quaternion();
   const V = new THREE.Vector3(), S = new THREE.Vector3(), M4 = new THREE.Matrix4(), C = new THREE.Color();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0), BLACK = new THREE.Color(0, 0, 0);
   let cursor = 0, hi = 0, live = 0;
 
   function kill(p) { if (p.on) { p.on = false; live--; } }
@@ -917,23 +934,23 @@ export function makeFireworks(THREE, ctx) {
           }
         }
       }
-      let sc = 0, f = 0;
-      if (p.on) {
-        const u = p.kind === 1 ? 0 : Math.min(1, p.age / p.life);
-        f = (1 - u) * (1 - u);
-        sc = p.size * (0.5 + 0.5 * (1 - u));
-        C.copy(p.col).multiplyScalar(f * p.boost);
-      } else {
-        C.setRGB(0, 0, 0);
+      if (!p.on) {                       // dead: zero matrix and black colour written once, then skipped
+        if (!p.zero) { p.zero = true; im.setMatrixAt(i, ZERO4); im.setColorAt(i, BLACK); }
+        continue;
       }
+      p.zero = false;
+      const u = p.kind === 1 ? 0 : Math.min(1, p.age / p.life);
+      const f = (1 - u) * (1 - u), sc = p.size * (0.5 + 0.5 * (1 - u));
+      C.copy(p.col).multiplyScalar(f * p.boost);
       V.set(p.x, p.y, p.z); S.set(sc, sc, sc);
       M4.compose(V, idQ, S);
       im.setMatrixAt(i, M4);
       im.setColorAt(i, C);
     }
+    while (hi > 0 && !parts[hi - 1].on) hi--;
     im.count = hi;
-    im.instanceMatrix.needsUpdate = true;
-    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    useRange(im.instanceMatrix, hi);
+    if (im.instanceColor) useRange(im.instanceColor, hi);
   }
 
   return {
@@ -1071,11 +1088,12 @@ export function makeHearts(THREE, ctx) {
     root.add(im);
     const parts = [];
     for (let i = 0; i < MAX; i++) {
-      parts.push({ on: false, x0: 0, y0: 0, z0: 0, vx: 0, vy: 0, age: 0, life: 1, size: 0.3, amp: 0.2, freq: 2, ph: 0 });
+      parts.push({ on: false, zero: false, x0: 0, y0: 0, z0: 0, vx: 0, vy: 0, age: 0, life: 1, size: 0.3, amp: 0.2, freq: 2, ph: 0 });
     }
     K[name] = { im, mat, tex, parts, cursor: 0, hi: 0 };
   }
   const E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(), M4 = new THREE.Matrix4();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0);
 
   function spawn(name, x, y, z) {
     const k = K[name];
@@ -1104,31 +1122,33 @@ export function makeHearts(THREE, ctx) {
       const k = K[name];
       for (let i = 0; i < k.hi; i++) {
         const p = k.parts[i];
-        let X = 0, Y = 0, Z = 0, sc = 0, rz = 0;
         if (p.on) {
           p.age += h;
           if (p.age >= p.life) { p.on = false; live--; }
         }
-        if (p.on) {
-          const u = p.age / p.life;
-          let env;
-          if (u < 0.12) env = (u / 0.12) * 1.15;
-          else if (u < 0.2) env = 1.15 - 0.15 * ((u - 0.12) / 0.08);
-          else if (u < 0.7) env = 1;
-          else env = Math.max(0, (1 - u) / 0.3);
-          sc = p.size * env;
-          X = p.x0 + p.vx * p.age + Math.sin(p.age * p.freq + p.ph) * p.amp;
-          Y = p.y0 + p.vy * p.age;
-          Z = p.z0;
-          rz = Math.sin(p.age * 1.6 + p.ph) * 0.3;
+        if (!p.on) {                     // dead: zero matrix written once, then skipped
+          if (!p.zero) { p.zero = true; k.im.setMatrixAt(i, ZERO4); }
+          continue;
         }
+        p.zero = false;
+        const u = p.age / p.life;
+        let env;
+        if (u < 0.12) env = (u / 0.12) * 1.15;
+        else if (u < 0.2) env = 1.15 - 0.15 * ((u - 0.12) / 0.08);
+        else if (u < 0.7) env = 1;
+        else env = Math.max(0, (1 - u) / 0.3);
+        const sc = p.size * env;
+        const X = p.x0 + p.vx * p.age + Math.sin(p.age * p.freq + p.ph) * p.amp;
+        const Y = p.y0 + p.vy * p.age, Z = p.z0;
+        const rz = Math.sin(p.age * 1.6 + p.ph) * 0.3;
         E.set(0, 0, rz); Q.setFromEuler(E);
         V.set(X, Y, Z); S.set(sc, sc, sc);
         M4.compose(V, Q, S);
         k.im.setMatrixAt(i, M4);
       }
+      while (k.hi > 0 && !k.parts[k.hi - 1].on) k.hi--;
       k.im.count = k.hi;
-      k.im.instanceMatrix.needsUpdate = true;
+      useRange(k.im.instanceMatrix, k.hi);
     }
   }
 

@@ -300,6 +300,7 @@ export function build(THREE, ctx) {
     screen: new THREE.Vector3(0, 1.375, 0.34),                              // centre of the screen
   };
   let scrAcc = 0;
+  const NO_PRESS = [];   // shared empty default, so update() does not allocate each frame
 
   return {
     root,
@@ -309,7 +310,7 @@ export function build(THREE, ctx) {
     update(dt, t = 0, st = {}) {
       dt = Math.max(0, Math.min(dt, 0.05));
       const active = !!st.active;
-      const press = st.press || [];
+      const press = st.press || NO_PRESS;
 
       // joystick tilt (smoothed); the stick anchor follows the moving ball
       const tx = active ? clamp1(st.stick?.x) : 0, ty = active ? clamp1(st.stick?.y) : 0;
