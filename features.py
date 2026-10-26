@@ -1194,8 +1194,7 @@ class Features:
             if hit is None and o.isdigit() and 1 <= int(o) <= len(pr["options"]):
                 hit = pr["options"][int(o) - 1]
             o = _norm(hit or outcome)
-        winners = [u for u, v in pr["picks"].values()
-                   if _norm(v) == o or (len(_norm(v)) >= 3 and len(o) >= 3 and (o.startswith(_norm(v)) or _norm(v).startswith(o)))]
+        winners = [u for u, v in pr["picks"].values() if _norm(v) == o]     # the whole pick must equal the answer
         for u in winners:
             self.add_points(u, 2 if pr["race"] else 1)
         self.log_event(f"prediction '{pr['question']}' -> {outcome}; right: {', '.join(winners) or 'nobody'}")
