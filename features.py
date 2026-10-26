@@ -22,6 +22,7 @@ import time
 import tomllib
 
 import aiohttp
+from urllib.parse import urlsplit
 from aiohttp import web
 
 from obs import OBS
@@ -515,7 +516,7 @@ class Features:
             asyncio.create_task(self.sk.send_overlays({"type": "avatar", "set": {"do": {"name": "stop", "at": int(time.time() * 1000)}}}))
             if prev and self.sk.avatar.get("mode") == set_to:     # only if nothing moved him during the break
                 asyncio.create_task(self.set_avatar({"mode": prev}))
-        self.sk.jobs.clear()          # anything that piled up is old news now
+        self.sk.jobs.clear(); self.sk.alerts.clear()   # anything that piled up is old news now
         self.sk.want_chat, self.sk.want_interject = False, None
         log.info("Unmuted")
         asyncio.create_task(self.sk.push_status())
@@ -794,7 +795,7 @@ class Features:
 
     def greet_tick(self, now):
         self.arrivals = [a for a in self.arrivals if now - a["at"] < 180]
-        if not self.arrivals or self.sk.jobs or self.sk.busy:
+        if not self.arrivals or self.sk.jobs or self.sk.alerts or self.sk.busy:
             return
         if now - self.last_greet < self.cfg["regulars"].get("greet_gap_seconds", 40):
             return
@@ -952,7 +953,7 @@ class Features:
 
     async def effect_tick(self, now):
         fx = self.cfg["voice_effects"]
-        if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.sk.jobs:
+        if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.sk.jobs or self.sk.alerts:
             return
         if self.muted() or self.away:     # he can't announce a prank while muted or away
             return
@@ -1103,7 +1104,7 @@ class Features:
         tr = self.trivia
         if not tr:
             return
-        if tr["phase"] == "ready" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs:
+        if tr["phase"] == "ready" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs and not self.sk.alerts:
             q = tr["questions"][tr["n"]]
             tr.update(phase="asking", q=q, answers={}, asked_at=now)
             spoken = " ".join(f"{LETTERS[i]}, {c}." for i, c in enumerate(q["choices"]))
@@ -1130,7 +1131,7 @@ class Features:
             await self.chat(f"Answer: {correct}. " + (f"Correct: {names}" if right else "Nobody got it!"))
             tr["n"] += 1
             await self.broadcast()
-        elif tr["phase"] == "reveal" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs:
+        elif tr["phase"] == "reveal" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs and not self.sk.alerts:
             if tr["n"] < tr["rounds"]:
                 tr["phase"] = "ready"
                 return
@@ -1597,7 +1598,7 @@ class Features:
 
     async def glance_tick(self, now):
         vc = self.cfg["vision"]
-        if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.sk.jobs:
+        if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.sk.jobs or self.sk.alerts:
             return
         if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race or self.glancing:
             return
@@ -1666,6 +1667,9 @@ class Features:
                 self.games_ws.discard(ws)
 
     async def games_ws_handler(self, request):
+        origin = request.headers.get("Origin")      # same rule as /ws: only our own pages (localhost) may drive the games
+        if origin and (urlsplit(origin).hostname or "") not in ("localhost", "127.0.0.1"):
+            raise web.HTTPForbidden(text="games socket is for the local pages only")
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
         self.games_ws.add(ws)
