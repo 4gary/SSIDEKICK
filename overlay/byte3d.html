@@ -355,23 +355,23 @@ const hips = group(squash, [0, 0.46, 0]);
 const torso = group(hips);
 
 // body: a chubby lathe, striped tee, dark collar, belt line
-const bodyProfile = [[0.30, 0.0], [0.335, 0.12], [0.34, 0.28], [0.325, 0.44], [0.29, 0.56], [0.22, 0.64], [0.14, 0.69], [0.0, 0.70]]
+const bodyProfile = [[0.31, 0.0], [0.37, 0.12], [0.40, 0.28], [0.385, 0.44], [0.33, 0.57], [0.24, 0.65], [0.13, 0.70], [0.0, 0.70]]
   .map(([r, y]) => new THREE.Vector2(r, y));
-const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.145, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.685, 0.0], [1, 1, 0.86], [Math.PI / 2, 0, 0]);
-mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.14, 24), M.skin, torso, [0, 0.72, 0.0]);          // neck
-mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
+const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.95]);
+mesh(new THREE.TorusGeometry(0.165, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.68, 0.0], [1, 1, 0.95], [Math.PI / 2, 0, 0]);
+mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.2, 24), M.skin, torso, [0, 0.64, 0.0]);          // short neck: shows between the chin and the collar
+mesh(new THREE.CylinderGeometry(0.35, 0.32, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.95]);
+mesh(new THREE.TorusGeometry(0.345, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.95], [Math.PI / 2, 0, 0]); // belt
 
 // arms: shoulder + elbow pivots so they bend naturally
 const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.30 * side, 0.62, 0]);
-  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
-  mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.068, ARM_L1 - 0.096, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
+  const sh = group(torso, [0.36 * side, 0.62, 0]);
+  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.14, 0.13, 0.13]);                                 // sleeve cap
+  mesh(new THREE.CylinderGeometry(0.11, 0.10, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);        // short sleeve
+  const up = mesh(new THREE.CapsuleGeometry(0.08, ARM_L1 - 0.12, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
   const el = group(sh, [0, -ARM_L1, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.062, ARM_L2 - 0.084, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
+  const fore = mesh(new THREE.CapsuleGeometry(0.073, ARM_L2 - 0.106, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
   const hand = group(el, [0, -ARM_L2, 0]);
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
@@ -383,9 +383,9 @@ const armN = arm(-1), armP = arm(1);              // armP holds the cigarette si
 
 function leg(side) {
   const hp = group(hips, [0.135 * side, 0.0, 0]);
-  mesh(new THREE.CapsuleGeometry(0.1, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);            // thigh
+  mesh(new THREE.CapsuleGeometry(0.12, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);           // thigh
   const kn = group(hp, [0, -0.21, 0]);
-  mesh(new THREE.CapsuleGeometry(0.088, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
+  mesh(new THREE.CapsuleGeometry(0.105, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
   const ft = group(kn, [0, -0.2, 0]);
   mesh(sphere, M.shoe, ft, [0, -0.0, 0.04], [0.115, 0.075, 0.165]);                           // sneaker body
   mesh(sphere, M.shoe, ft, [0, -0.01, 0.13], [0.1, 0.06, 0.09]);                              // toe cap
