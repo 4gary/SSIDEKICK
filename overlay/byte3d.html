@@ -531,12 +531,13 @@ const crownXYZ = (x, y, z, out = 0) => {        // unit upper hemisphere -> crow
     bs.lineTo(x, (CAP.rz - 0.02) * Math.sqrt(Math.max(0, 1 - (x / (CAP.rx - 0.02)) ** 2)));
   }
   const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 3, curveSegments: 40 });
-  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.03, 0);
+  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.015, 0);               // the slab straddles the rim line (y 0): it comes out from under the crown's edge
   const bp = brimGeo.attributes.position;
+  const rimAt = x => (CAP.rz - 0.02) * Math.sqrt(Math.max(0, 1 - (x / (CAP.rx - 0.02)) ** 2));   // the crown wall at this x: the bill's root
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), z = bp.getZ(i);
-    const f = clamp((z - rimZ) / (CAP.rz + CAP.bill - rimZ), 0, 1);           // 0 at the rim .. 1 at the bill front
-    bp.setY(i, bp.getY(i) - 0.17 * (x / bw) ** 2 * (0.35 + 0.65 * f) - 0.16 * f);   // curved bill, pitched down so it shades the eyes instead of pointing at the ceiling
+    const f = clamp((z - rimAt(x)) / (CAP.bill + 0.02), 0, 1);                // 0 where the bill leaves the crown wall .. 1 at the bill front
+    bp.setY(i, bp.getY(i) - 0.17 * (x / bw) ** 2 * (0.15 + 0.85 * f) - 0.16 * f);   // curved bill, pitched down so it shades the eyes instead of pointing at the ceiling; the root stays at the rim all the way round
   }
   brimGeo.computeVertexNormals();
   const brim = group(capIn);
