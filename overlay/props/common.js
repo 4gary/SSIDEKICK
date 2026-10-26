@@ -49,6 +49,11 @@ export function rboxSmooth(THREE, w, h, d, r, seg = 12) {
   return g;
 }
 
+// Number guard and random helpers (fx.js semantics; handheld.js keeps its own num with a default)
+export const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+export const rnd = (a, b) => a + Math.random() * (b - a);
+export const stepOf = (dt) => clamp(num(dt, 1 / 60), 0, 0.1);
+
 // Canvas helper: rounded rectangle path
 export function rr(g, x, y, w, h, r) {
   g.beginPath(); g.moveTo(x + r, y);
