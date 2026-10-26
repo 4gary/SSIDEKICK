@@ -40,6 +40,9 @@ async def no_cache(request, handler):
         resp = e
     if request.path == "/" or request.path.startswith(("/static", "/control", "/dock", "/games")):
         resp.headers["Cache-Control"] = "no-store"
+    if request.path.startswith("/static"):
+        # the loader page is a local file in OBS, so its origin is "null": static files must allow it to check them
+        resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
 
 
