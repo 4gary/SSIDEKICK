@@ -45,7 +45,7 @@ history_lines = 30            # how much recent chat/conversation it remembers
 url = "ws://127.0.0.1:8080/"
 password = ""                 # only if you turned on authentication in Streamer.bot
 action_group = "Sidekick"     # ONLY actions in this group can be run by the sidekick
-chat_can_run_actions = false  # true = viewers saying "Byte, <do thing>" can trigger actions too (careful!)
+chat_can_run_actions = false  # true = viewers saying "Gary, <do thing>" can trigger actions too (careful!)
 
 [tts]
 # "windows" = built-in Windows voices, zero setup
@@ -73,7 +73,8 @@ device = ""                   # mic name or index. Blank = Windows default mic
 energy_threshold = 0.015      # raise if it triggers on background noise, lower if it misses you
 
 [memory]
-# Logs every line to logs/YYYY-MM-DD.jsonl and remembers facts + stream summaries in memory.json.
+# enabled = true: remembers facts + stream summaries in memory.json, and uses them in replies.
+# enabled = false: nothing is remembered or learned, but every line is still logged to logs/YYYY-MM-DD.jsonl.
 # memory.json is plain text: open it to see (or fix/delete) what the bot remembers.
 enabled = true
 learn_every_lines = 25        # mine new facts after this many lines (only while the bot is idle)
