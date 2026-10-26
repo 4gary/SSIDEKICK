@@ -54,6 +54,19 @@ OTHER_EVENTS = {"Twitch": ["Raid", "Sub", "ReSub", "GiftSub", "GiftBomb", "Cheer
                 "Obs": ["SceneChanged"]}
 
 
+def _who(data):
+    """Who a non-chat event is about, for the log line. Streamer.bot puts the name in a few different places."""
+    user = data.get("user")
+    if isinstance(user, dict):
+        for k in ("name", "login", "displayName", "userName"):
+            if user.get(k):
+                return str(user[k])
+    for k in ("displayName", "userName", "user"):
+        if isinstance(data.get(k), str) and data[k]:
+            return data[k]
+    return "?"
+
+
 def _parse_chat(data):
     """Streamer.bot's payload differs a bit by version and platform, so look in the usual places."""
     msg = data.get("message")
@@ -83,6 +96,8 @@ class StreamerBot:
         self.on_chat = None
         self.on_status = None
         self.on_event = None
+        self._warned = False      # "not connected" warning is logged once per outage, not every 5 s
+        self._sub_logged = False  # the first raw Subscribe reply is logged once, so its shape is visible
 
     async def run(self, on_chat=None, on_status=None):
         self.on_chat, self.on_status = on_chat, on_status
@@ -94,9 +109,11 @@ class StreamerBot:
                     self._hello_evt = asyncio.Event()
                     reader = asyncio.create_task(self._reader())
                     await self._setup()
+                    self._warned = False   # connected again: the next outage gets its own warning
                     await reader
+                    log.info("Streamer.bot connection closed; retrying in 5s")
             except Exception as e:
-                if self.connected or not hasattr(self, "_warned"):
+                if not self._warned:
                     log.warning("Streamer.bot not connected (%s). Retrying every 5s...", e)
                     self._warned = True
             self.connected = False
@@ -125,15 +142,29 @@ class StreamerBot:
                 name, text = _parse_chat(data.get("data") or {})
                 if name and text:
                     await self.on_chat(name, text, ev["source"].lower())
-            elif ev and self.on_event:
-                # as a task, so the handler can make its own requests without blocking this reader
-                asyncio.create_task(self._event(ev.get("source"), ev.get("type"), data.get("data") or {}))
+            elif ev:
+                log.info("[sb] %s.%s from %s", ev.get("source"), ev.get("type"), _who(data.get("data") or {}))
+                if self.on_event:
+                    # as a task, so the handler can make its own requests without blocking this reader
+                    asyncio.create_task(self._event(ev.get("source"), ev.get("type"), data.get("data") or {}))
 
     async def _event(self, source, etype, data):
         try:
             await self.on_event(source, etype, data)
         except Exception as e:
             log.warning("Couldn't handle Streamer.bot event %s: %s", etype, e)
+
+    def _check_subscribe(self, platform, names, res):
+        """Streamer.bot answers every Subscribe; a refusal says why (wrong event name, not allowed, etc)."""
+        if not self._sub_logged:
+            self._sub_logged = True
+            log.info("First Subscribe reply (%s): %s", platform, res)
+        if res.get("status") in (None, "ok"):
+            for n in names:
+                log.info("Subscribed to %s.%s", platform, n)
+        else:
+            log.warning("Streamer.bot refused Subscribe to %s %s: %s", platform, ", ".join(names),
+                        res.get("error", res))
 
     async def request(self, req, timeout=10, **fields):
         if not self.ws:
@@ -166,16 +197,18 @@ class StreamerBot:
         if self.on_chat:
             for platform, events in CHAT_EVENTS.items():
                 try:  # one at a time so a platform this version doesn't know can't break the others
-                    await self.request("Subscribe", events={platform: events})
-                except Exception:
-                    pass
+                    res = await self.request("Subscribe", events={platform: events})
+                    self._check_subscribe(platform, events, res)
+                except Exception as e:
+                    log.warning("Subscribe to %s chat failed: %s", platform, e)
         if self.on_event:
             for platform, events in OTHER_EVENTS.items():
                 for e in events:
                     try:
-                        await self.request("Subscribe", events={platform: [e]})
-                    except Exception:
-                        pass
+                        res = await self.request("Subscribe", events={platform: [e]})
+                        self._check_subscribe(platform, [e], res)
+                    except Exception as ex:
+                        log.warning("Subscribe to %s.%s failed: %s", platform, e, ex)
         self.connected = True
         await self.refresh_actions()
         log.info("Connected to Streamer.bot. %d sidekick action(s): %s",
