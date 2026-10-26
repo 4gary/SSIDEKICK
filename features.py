@@ -652,8 +652,9 @@ class Features:
                 await self.start_trivia(g("topic"), _int(g("rounds")) or None)
         elif kind == "predict":
             if "resolve" in p:          # a blank resolve does nothing (never starts a new prediction)
-                if g("resolve"):
-                    await self.resolve_predict(g("resolve"))
+                if not g("resolve"):
+                    return {"ok": False, "reason": "nothing to settle"}
+                await self.resolve_predict(g("resolve"))
             elif g("cancel"):
                 self.predict = None
                 await self.broadcast()
@@ -694,7 +695,7 @@ class Features:
         left = self.mute_until - time.monotonic()
         return {"muted": None if left <= 0 else ("until called" if left == float("inf") else f"{int(left)}s left"),
                 "poll": bool(self.poll), "trivia": bool(self.trivia), "predict": bool(self.predict),
-                "race": bool(self.race), "role": self.role[0] if self.role else None,
+                "race": bool(self.race), "away": bool(self.away), "role": self.role[0] if self.role else None,
                 "obs": bool(self.obs and self.obs.connected), "scene": self.scene,
                 "vision": self.cfg["vision"].get("enabled") and self.vision_ready(),
                 "voice_effects": self.effect_actions()}
