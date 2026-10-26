@@ -541,22 +541,22 @@ const hairG = group(head);
 const hairSpring = new Spring(40, 6);
 {
   // hair follows the head: full under the cap rim (so the cap sits on hair, not on air), hugging the skull down to the nape
-  const front = 1.0, nu = 150, nv = 36, capR = 0.79;
+  const front = 1.0, nu = 150, nv = 36;
   const pos = [], uv = [], idx = [];
   const ss = (a, b, x) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
   for (let i = 0; i <= nu; i++) {
     const az = front + (Math.PI * 2 - front * 2) * i / nu;           // around the back, from one cheek to the other (0 = face)
     const side = Math.abs(Math.atan2(Math.sin(az), Math.cos(az)));    // 0 at the face .. pi at the back of the head
     const nearFace = 1 - ss(front, front + 0.8, side);               // sideburns by the cheeks are shorter
-    const lock = 0.5 + 0.5 * Math.sin(az * 31 + Math.cos(az * 9) * 2);
-    const elB = lerp(-0.78, -0.3, nearFace) - 0.06 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
+    const lock = 0.5 + 0.5 * Math.sin(az * 13 + Math.cos(az * 5) * 2);
+    const elB = lerp(-0.78, -0.3, nearFace) - 0.02 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
     const elT = 0.62;                                                // starts up inside the cap
     for (let j = 0; j <= nv; j++) {
       const el = lerp(elT, elB, j / nv);
       const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
       const hr = Math.hypot(x, z);
       const fill = 1 - ss(-0.15, 0.3, el);                            // 0 up by the cap rim, 1 lower down
-      const want = lerp(Math.max(hr + 0.04, Math.min(capR, hr + 0.16)), hr + 0.025 + 0.01 * Math.sin(az * 47), fill);
+      const want = lerp(hr + 0.03, hr + 0.025 + 0.01 * Math.sin(az * 47), fill);   // 0.03 off the skull: the cap covers the top
       const k = want / Math.max(hr, 1e-3);
       pos.push(x * k, y, z * k); uv.push(i / nu, j / nv);
     }
