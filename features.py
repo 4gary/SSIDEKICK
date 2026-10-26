@@ -83,12 +83,35 @@ def event_user(d, nested=("user", "from", "raider", "message")):
                       "username", "name", "login", "user_login", "from_broadcaster_user_login"))
     if name:
         return name
+    if isinstance(d.get("user"), str) and d["user"].strip():     # some payloads just say "user": "bob"
+        return d["user"].strip()
     for k in nested:
         if isinstance(d.get(k), dict):
             name = event_user(d[k], ())
             if name:
                 return name
     return None
+
+
+def sub_tier(v):
+    """Streamer.bot sends subTier as 0 (Prime), 1, 2 or 3; some payloads say 1000/2000/3000 or "prime".
+    Returns (tier as "1000"/"2000"/"3000" or "", is_prime)."""
+    s = "" if v is None else str(v).strip().lower()
+    if s in ("0", "prime"):
+        return "", True
+    s = {"1": "1000", "2": "2000", "3": "3000"}.get(s, s)
+    return (s if s in ("1000", "2000", "3000") else ""), False
+
+
+def _int(v, default=0):
+    """Query values arrive as text, and a placeholder like "%viewers%" can slip through: use the default."""
+    if v in (None, ""):
+        return default
+    try:
+        return int(float(v))
+    except (TypeError, ValueError, OverflowError):
+        log.warning("Ignoring non-number %r, using %s", v, default)
+        return default
 
 
 def event_num(d, keys):
@@ -1218,13 +1241,18 @@ class Features:
     # ------------------------------------------------------------ raids, subs, gifts, cheers, follows
 
     async def on_sb_event(self, source, etype, data):
+        log.info("[sb] %s %s from %s", source, etype, event_user(data) or "?")
         if source == "Obs" and etype == "SceneChanged":
             name = (data.get("scene") or {}).get("sceneName") if isinstance(data.get("scene"), dict) else None
             name = name or data.get("sceneName") or data.get("scene")
             if isinstance(name, str) and not (self.obs and self.obs.connected):
                 await self.on_scene(name)
             return
-        if source != "Twitch" or not self.cfg["events"].get("enabled"):
+        if source != "Twitch":
+            return
+        if not self.cfg["events"].get("enabled"):
+            self.warn_once("alerts_off", "Alerts are off ([events] enabled = false in features.toml), so raids, subs, "
+                           "cheers and follows are ignored")
             return
         user = event_user(data) or "someone"
         if etype == "RewardRedemption":
@@ -1240,6 +1268,8 @@ class Features:
                 "Cheer": "cheer", "Follow": "follow"}.get(etype)
         if not kind:
             return
+        raw_tier = next((data.get(k) for k in ("subTier", "sub_tier", "tier") if data.get(k) not in (None, "")), None) \
+            if etype in ("Sub", "ReSub", "GiftSub", "GiftBomb") else None
         recipient = event_user(data.get("recipient")) if isinstance(data.get("recipient"), dict) else \
             _first(data, ("recipientDisplayName", "recipientUserName", "recipient_user_name"))
         await self.stream_event(
@@ -1249,7 +1279,7 @@ class Features:
                                     "cumulative_total")),
             count=event_num(data, ("gifts", "total", "count", "giftCount")),
             bits=event_num(data, ("bits", "amount")),
-            tier=str(data.get("sub_tier") or data.get("tier") or data.get("subTier") or ""),
+            tier="" if raw_tier is None else str(raw_tier),
             prime=bool(data.get("is_prime") or data.get("isPrime")),
             anonymous=bool(data.get("anonymous") or data.get("isAnonymous")),
             recipient=recipient or "")
@@ -1270,6 +1300,8 @@ class Features:
         visits = self.state["visits"].get(user.lower(), {})
         if visits.get("days", 0) >= 2:
             known += f" They've chatted on {visits['days']} different days."
+        tier, sub_prime = sub_tier(tier)
+        prime = prime or sub_prime
         tier_txt = " Prime" if prime else {"2000": " tier 2", "3000": " tier 3"}.get(tier, "")
         if kind == "raid":
             n = self.state["raids"].get(user.lower(), 0) + 1
