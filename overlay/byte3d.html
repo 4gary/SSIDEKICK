@@ -177,27 +177,32 @@ const capTex = canvasTex(1024, 512, (g, w, h) => {
     g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
   }
   g.globalAlpha = 1;
-  // panel seams: six panels, none through the front
-  g.strokeStyle = "rgba(90,0,6,.55)"; g.lineWidth = 3;
+  // panel seams: six panels, none through the front. A shadow line under each raised seam, with a row of stitches beside it
   for (let k = 0; k < 6; k++) {
     const u = ((0.25 + (k + 0.5) / 6) % 1) * w;
+    g.strokeStyle = "rgba(70,0,4,.6)"; g.lineWidth = 7; g.setLineDash([]);
     g.beginPath(); g.moveTo(u, 0); g.lineTo(u, h); g.stroke();
-    g.setLineDash([6, 7]); g.strokeStyle = "rgba(255,180,170,.35)"; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(u + 4, 0); g.lineTo(u + 4, h); g.stroke();
-    g.setLineDash([]); g.strokeStyle = "rgba(90,0,6,.55)"; g.lineWidth = 3;
+    g.setLineDash([5, 6]); g.strokeStyle = "rgba(255,190,180,.5)"; g.lineWidth = 1.6;
+    for (const dx of [-7, 7]) { g.beginPath(); g.moveTo(u + dx, 0); g.lineTo(u + dx, h); g.stroke(); }
+    g.setLineDash([]);
   }
-  // fuzzy spray-stencil letters on the front panel
+  for (let k = 1; k < 6; k++) {                                     // an eyelet in each panel but the front one
+    const x = ((0.25 + k / 6) % 1) * w, y = h * 0.45;
+    g.fillStyle = "rgba(255,160,150,.45)"; g.beginPath(); g.arc(x, y, 8, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#3a0004"; g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill();
+  }
+  // fuzzy spray-stencil letters on the front panel: narrow enough to stay on the front, where the camera reads them
   g.save();
   g.translate(w * 0.25, h * 0.70);
-  g.scale(1, 1.3);
-  const px = Math.min(116, 560 / Math.max(1, CAP_TEXT.length) * 1.45);
+  g.scale(0.95, 1.25);
+  const px = Math.min(92, 560 / Math.max(1, CAP_TEXT.length) * 1.45);
   g.font = `900 ${px}px 'Arial Rounded MT Bold', 'Arial Black', 'Segoe UI Black', Impact, sans-serif`;
   g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
-  g.shadowColor = "rgba(255,255,255,.9)"; g.shadowBlur = 22;
+  g.shadowColor = "rgba(255,255,255,.9)"; g.shadowBlur = 16;
   g.fillStyle = "#fff"; for (let i = 0; i < 3; i++) g.fillText(CAP_TEXT, 0, 0);
   g.shadowBlur = 0;
-  g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 9;
-  for (let i = 0; i < 14; i++) g.strokeText(CAP_TEXT, (rnd() - 0.5) * 7, (rnd() - 0.5) * 5);
+  g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 7;
+  for (let i = 0; i < 12; i++) g.strokeText(CAP_TEXT, (rnd() - 0.5) * 6, (rnd() - 0.5) * 4);
   g.fillStyle = "#ffffff"; g.fillText(CAP_TEXT, 0, 0);
   g.restore();
 });
@@ -322,9 +327,9 @@ function updateFur(t) {
 // ------------------------------------------------------------ materials
 const M = {
   skin: new THREE.MeshPhysicalMaterial({ map: skinTex, roughness: 0.58, sheen: 0.55, sheenColor: new THREE.Color(0xffb89a), sheenRoughness: 0.5 }),
-  cap: new THREE.MeshStandardMaterial({ map: capTex, roughness: 1, bumpMap: fuzzBump, bumpScale: 1.5 }),
-  capPlain: new THREE.MeshStandardMaterial({ color: 0xd8111a, roughness: 1, bumpMap: fuzzBump, bumpScale: 1.5 }),
-  brim: new THREE.MeshStandardMaterial({ color: 0xcf0f18, roughness: 1, bumpMap: fuzzBump, bumpScale: 1.5 }),
+  cap: new THREE.MeshStandardMaterial({ map: capTex, roughness: 0.86, bumpMap: fuzzBump, bumpScale: 0.6 }),       // twill, not shag
+  capPlain: new THREE.MeshStandardMaterial({ color: 0xd8111a, roughness: 0.86, bumpMap: fuzzBump, bumpScale: 0.6 }),
+  brim: new THREE.MeshStandardMaterial({ color: 0xc90e17, roughness: 0.8, bumpMap: fuzzBump, bumpScale: 0.4 }),
   hair: new THREE.MeshStandardMaterial({ color: 0x5a3418, roughness: 0.85, bumpMap: fuzzBump, bumpScale: 2 }),
   stache: new THREE.MeshStandardMaterial({ color: 0x3f2310, roughness: 0.9 }),
   face: null,
@@ -378,7 +383,7 @@ function arm(side) {                              // side: -1 = viewer's left (w
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
   for (let i = 0; i < 3; i++) mesh(sphere, M.skin, hand, [(i - 1) * 0.045, -0.11, 0.01], [0.028, 0.035, 0.028]);  // finger bumps
-  sh.rotation.z = 0.18 * side;
+  sh.rotation.z = 0.10 * side;
   return { sh, el, hand, side, up, fore };
 }
 const armN = arm(-1), armP = arm(1);              // armP holds the cigarette side
@@ -399,11 +404,11 @@ const legN = leg(-1), legP = leg(1);
 
 // head on a neck pivot; everything below is built with the head centre at the origin
 const neck = group(torso, [0, 0.70, 0]);
-const head = new THREE.Group(); head.position.y = 0.45;
-const HA = 0.66, HB = 0.60, HC = 0.62;          // head ellipsoid radii
+const head = new THREE.Group(); head.position.y = 0.44;
+const HA = 0.63, HB = 0.57, HC = 0.59;          // head ellipsoid radii: a touch smaller than the balloon he had, still a big chibi head
 mesh(sphere, M.skin, head, [0, 0, 0], [HA, HB, HC]);
-mesh(sphere, M.skin, head, [0, -0.28, 0.0], [0.53, 0.30, 0.40]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
-mesh(sphere, M.skin, head, [0, -0.25, 0.59], [0.07, 0.06, 0.065]);  // nose
+mesh(sphere, M.skin, head, [0, -0.265, 0.0], [0.50, 0.285, 0.38]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
+mesh(sphere, M.skin, head, [0, -0.175, 0.555], [0.10, 0.088, 0.095]);  // a proper button nose, sitting on top of the mustache; gives him a profile
 
 function onFace(obj, az, el, off = 0) {         // place on the head surface at azimuth/elevation (radians), local +z = surface normal
   const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
@@ -481,31 +486,43 @@ const ember = mesh(sphere, M.ember, cig, [0, 0, 0.39], [0.024, 0.024, 0.012]);
 const emberLight = new THREE.PointLight(0xff6020, 0.15, 0.7, 2);
 emberLight.position.z = 0.4; cig.add(emberLight);
 
-// cap: a baseball cap. A felt crown with taller front panels, its rim about 0.05 off the hair, a button, and a bill
-// that juts from the front and curves down at the sides. capG keeps its pivot (animation moves it); capIn holds the
-// geometry with the rim at its origin (head 0, 0.13, -0.02). Tilted back a little, so the rim sits lower at the nape.
-const CAP = { rx: 0.71, rz: 0.69, h: 0.56, front: 0.12, bill: 0.48, tilt: -0.08 };
+// cap: a six-panel baseball cap. A low, snug crown whose rim rides on the hair (about 0.01 off it), raised panel seams
+// that meet at a top button, eyelets, and a bill that juts from the front, pitched down, curving down at the sides.
+// Short nap on the crown, not shag, so the silhouette stays crisp. capG keeps its pivot (the animation moves it); capIn
+// holds the geometry with the rim at its origin (head 0, 0.13, -0.02). Tilted back a little, so the rim sits lower at
+// the nape and the bill clears the brows.
+const CAP = { rx: 0.655, rz: 0.635, h: 0.47, front: 0.10, bulge: 0.03, bill: 0.46, tilt: -0.10 };
 const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = CAP.tilt;
 const capIn = group(capG, [0, -0.07, 0.01]);
+const crownXYZ = (x, y, z, out = 0) => {        // unit upper hemisphere -> crown surface, pushed `out` along the radius
+  const tall = 1 + CAP.front * Math.max(0, z) * (1 - y * 0.4);          // front panels stand taller, the back slopes away
+  const box = 1 + CAP.bulge * Math.sin(Math.PI * y);                    // a touch fuller at the shoulders, less of a dome
+  return [x * (CAP.rx * box + out), y * (CAP.h * tall + out), z * (CAP.rz * box + out)];
+};
 {
   const crownGeo = new THREE.SphereGeometry(1, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.5);
   const cp = crownGeo.attributes.position;
-  for (let i = 0; i < cp.count; i++) {
-    const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i);
-    const tall = 1 + CAP.front * Math.max(0, z) * (1 - y * 0.4);          // front panels stand taller, the back slopes away
-    const box = 1 + 0.06 * Math.sin(Math.PI * y);                         // fuller shoulders, less of a dome
-    cp.setXYZ(i, x * CAP.rx * box, y * CAP.h * tall, z * CAP.rz * box);
-  }
+  for (let i = 0; i < cp.count; i++) cp.setXYZ(i, ...crownXYZ(cp.getX(i), cp.getY(i), cp.getZ(i)));
   crownGeo.computeVertexNormals();
   const crown = mesh(crownGeo, M.cap, capIn);
   crown.material = M.cap.clone(); crown.material.side = THREE.DoubleSide;
-  capIn.add(makeFur(crownGeo, M.cap, { layers: 14, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
-  const buttonGeo = new THREE.SphereGeometry(0.05, 24, 16).scale(1, 0.6, 1).translate(0, CAP.h + 0.005, 0);
+  capIn.add(makeFur(crownGeo, M.cap, { layers: 5, length: 0.011, density: 110, gravity: 0.2, root: 0.72, tip: 1.06, thick: 0.9 }));
+  // raised seams between the six panels (none through the front panel), from the rim up to the button
+  const seamMat = new THREE.MeshStandardMaterial({ color: 0xb80d14, roughness: 0.9 });
+  for (let k = 0; k < 6; k++) {
+    const phi = Math.PI / 2 + (k + 0.5) * Math.PI / 3;                  // the front is +z (phi 90 deg); seams at 30, 90 and 150 deg off it, both sides
+    const pts = [];
+    for (let s = 0; s <= 20; s++) {
+      const th = lerp(Math.PI / 2, 0.1, s / 20);                         // rim .. just short of the button
+      pts.push(new THREE.Vector3(...crownXYZ(Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th), 0.004)));
+    }
+    mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.007, 6, false), seamMat, capIn);
+  }
+  const buttonGeo = new THREE.SphereGeometry(0.046, 24, 16).scale(1, 0.55, 1).translate(0, CAP.h - 0.002, 0);
   mesh(buttonGeo, M.capPlain, capIn);
-  capIn.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
 
   // bill: a crescent from the crown's front rim out to a rounded front edge, narrower than the crown, curved down at the sides
-  const bw = 0.62, rimZ = CAP.rz * Math.sqrt(1 - (bw / CAP.rx) ** 2) - 0.02;   // where the bill's sides meet the rim
+  const bw = 0.57, rimZ = CAP.rz * Math.sqrt(1 - (bw / CAP.rx) ** 2) - 0.02;   // where the bill's sides meet the rim
   const bs = new THREE.Shape();
   bs.moveTo(bw, rimZ);
   bs.absellipse(0, rimZ, bw, CAP.rz + CAP.bill - rimZ, 0, Math.PI, false);  // outer edge, out to the bill front
@@ -513,23 +530,29 @@ const capIn = group(capG, [0, -0.07, 0.01]);
     const x = lerp(-bw, bw, k / 32);
     bs.lineTo(x, (CAP.rz - 0.02) * Math.sqrt(Math.max(0, 1 - (x / (CAP.rx - 0.02)) ** 2)));
   }
-  const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 40 });
-  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.04, 0);
+  const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 3, curveSegments: 40 });
+  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.03, 0);
   const bp = brimGeo.attributes.position;
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), z = bp.getZ(i);
     const f = clamp((z - rimZ) / (CAP.rz + CAP.bill - rimZ), 0, 1);           // 0 at the rim .. 1 at the bill front
-    bp.setY(i, bp.getY(i) - 0.24 * (x / bw) ** 2 * (0.35 + 0.65 * f) - 0.12 * f);   // curved bill, pitched down a touch
+    bp.setY(i, bp.getY(i) - 0.17 * (x / bw) ** 2 * (0.35 + 0.65 * f) - 0.16 * f);   // curved bill, pitched down so it shades the eyes instead of pointing at the ceiling
   }
   brimGeo.computeVertexNormals();
   const brim = group(capIn);
   mesh(brimGeo, M.brim, brim);
-  brim.add(makeFur(brimGeo, M.brim, { layers: 8, length: 0.022, density: 110, gravity: 0.2, root: 0.6, tip: 1.12 }));
 }
 
 // straight hair: a smooth curtain that hangs from under the cap to about jaw level, with combed strands painted on and pointed ends
+// the hem is uv.y = 1, the top row of the canvas: that band is clear except for pointed strand tips, so the hair ends in strands, not a helmet line
 const hairTex = canvasTex(1024, 256, (g, w, h) => {
-  g.fillStyle = "#4b2a13"; g.fillRect(0, 0, w, h);
+  const tip = h * 0.14;
+  g.fillStyle = "#4b2a13"; g.fillRect(0, tip, w, h - tip);
+  for (let i = 0; i < 170; i++) {                                 // strand tips poking down past the hem line
+    const x = rnd() * w, hw = 5 + rnd() * 9, l = tip * (0.3 + rnd() * 0.7);
+    g.beginPath(); g.moveTo(x - hw, tip + 2); g.lineTo(x + (rnd() - 0.5) * 4, tip - l); g.lineTo(x + hw, tip + 2); g.closePath(); g.fill();
+  }
+  g.globalCompositeOperation = "source-atop";                       // everything below paints only where there is hair
   for (let i = 0; i < 2600; i++) {                                // long straight strands running top to bottom
     const x = rnd() * w, l = 50 + rnd() * 70;
     g.strokeStyle = rnd() > 0.5 ? `rgba(120,74,38,${0.15 + rnd() * 0.25})` : `rgba(40,20,8,${0.2 + rnd() * 0.35})`;
@@ -537,13 +560,14 @@ const hairTex = canvasTex(1024, 256, (g, w, h) => {
     const y0 = rnd() * h;
     g.beginPath(); g.moveTo(x, y0); g.lineTo(x + (rnd() - 0.5) * 3, y0 + l); g.stroke();
   }
-  const sheen = g.createLinearGradient(0, 0, 0, h);                // a soft shine band, like brushed hair
-  sheen.addColorStop(0, "rgba(30,14,5,.45)"); sheen.addColorStop(0.28, "rgba(255,210,160,0)"); sheen.addColorStop(0.38, "rgba(255,205,150,.22)");
+  const sheen = g.createLinearGradient(0, 0, 0, h);                // a soft shine band, like brushed hair; darker toward the tips
+  sheen.addColorStop(0, "rgba(30,14,5,.5)"); sheen.addColorStop(0.28, "rgba(255,210,160,0)"); sheen.addColorStop(0.38, "rgba(255,205,150,.22)");
   sheen.addColorStop(0.5, "rgba(255,210,160,0)"); sheen.addColorStop(1, "rgba(30,14,5,.25)");
   g.fillStyle = sheen; g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = "source-over";
 });
 hairTex.wrapS = THREE.RepeatWrapping; hairTex.repeat.set(3, 1);
-M.hair = new THREE.MeshStandardMaterial({ map: hairTex, roughness: 0.55, bumpMap: hairTex, bumpScale: 0.6, side: THREE.DoubleSide });
+M.hair = new THREE.MeshStandardMaterial({ map: hairTex, alphaTest: 0.5, roughness: 0.55, bumpMap: hairTex, bumpScale: 0.6, side: THREE.DoubleSide });
 const hairG = group(head);
 const hairSpring = new Spring(40, 6);
 {
@@ -556,14 +580,14 @@ const hairSpring = new Spring(40, 6);
     const side = Math.abs(Math.atan2(Math.sin(az), Math.cos(az)));    // 0 at the face .. pi at the back of the head
     const nearFace = 1 - ss(front, front + 0.8, side);               // sideburns by the cheeks are shorter
     const lock = 0.5 + 0.5 * Math.sin(az * 13 + Math.cos(az * 5) * 2);
-    const elB = lerp(-0.78, -0.3, nearFace) - 0.02 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
+    const elB = lerp(-0.85, -0.36, nearFace) - 0.04 * lock;         // the hem: nape at the back, sideburns at the sides, uneven. The last 14% of the strip is the strand tips
     const elT = 0.62;                                                // starts up inside the cap
     for (let j = 0; j <= nv; j++) {
       const el = lerp(elT, elB, j / nv);
       const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
       const hr = Math.hypot(x, z);
       const fill = 1 - ss(-0.15, 0.3, el);                            // 0 up by the cap rim, 1 lower down
-      const want = lerp(hr + 0.03, hr + 0.025 + 0.01 * Math.sin(az * 47), fill);   // 0.03 off the skull: the cap covers the top
+      const want = lerp(hr + 0.02, hr + 0.022 + 0.008 * Math.sin(az * 47), fill);   // 0.02 off the skull: hair that lies flat, with the cap sitting right on it
       const k = want / Math.max(hr, 1e-3);
       pos.push(x * k, y, z * k); uv.push(i / nu, j / nv);
     }
@@ -924,6 +948,7 @@ const debug = {
   debugAct: () => ({ act: act.name, t: +S.t.toFixed(2), t0: act.t0, w: +J.w.toFixed(2), wP: +J.wP.toFixed(2), moving: +nav.moving.toFixed(2), busy: +Math.max(S.talk, S.think).toFixed(2) }),
   screenPos: () => { const v = byte.position.clone(); v.y += 1.2 * settings.size; v.project(camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; },
   teleport: (x, z) => { nav.x = x; nav.z = z; },
+  hands: () => [armN, armP].map(a => { const v = new THREE.Vector3(); a.hand.getWorldPosition(v); return v.toArray().map(n => +n.toFixed(2)); }),
   step: (n = 60, dt = 1 / 30) => { for (let i = 0; i < n; i++) update(dt); return { x: +nav.x.toFixed(2), z: +nav.z.toFixed(2), yaw: +nav.yaw.toFixed(2), moving: +nav.moving.toFixed(2), off: nav.offscreen, mode: currentMode() }; },
   get J() { return J; }, get bulb() { return [bulbAt, thinkStart, S.think, thinkStyle]; }, get cigOn() { return cig.visible; }, itemInfo: k => { const r = ITEMS[k]?.root; return r && { vis: r.visible, pos: r.position.toArray().map(v => +v.toFixed(2)), s: +r.scale.x.toFixed(2), parent: r.parent?.type }; },
   scene: name => applySettings({ acts: { scene: name } }), event: (name, info = {}) => doActivity(name, info), get items() { return Object.keys(ITEMS); }, get fx() { return Object.keys(FX); },
@@ -967,7 +992,7 @@ function onTalkEnd() { nav.lingerUntil = S.t + 5; }
 function startGesture(name) {
   const durs = { drag: 3.4, scratch: 2.0, cap: 1.8, wave: 1.6, stretch: 2.2, ...BITS };
   if (!durs[name]) return;
-  act = { name, t0: S.t, dur: durs[name] };
+  act = { name, t0: S.t, dur: durs[name], side: Math.sin(nav.yaw) > 0.05 ? -1 : 1 };   // scratch and cap use the hand on the side nearer the camera, so it is not hidden behind his head
   fired.clear();
 }
 
@@ -981,12 +1006,12 @@ const clock = new THREE.Clock();
 function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, up: arm.up.position.y, fore: arm.fore.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
 const eulerPose = (sx, sy, sz, ex) => ({ q: new THREE.Quaternion().setFromEuler(new THREE.Euler(sx, sy, sz)), ex });
 const POSE = {
-  rest: s => eulerPose(0.05, 0, 0.18 * s, -0.25),
+  rest: s => eulerPose(0.0, 0, 0.10 * s, -0.5),           // arms hang by his sides, elbows a little bent, hands in front of the hips: not a starfish
   gestureOut: s => eulerPose(-0.9, 0, 0.85 * s, -1.1),
   gestureUp: s => eulerPose(-1.6, 0, 0.5 * s, -1.6),
   gesturePoint: s => eulerPose(-1.3, -0.3 * s, 0.25 * s, -0.4),
   shrug: s => eulerPose(-0.5, 0, 1.0 * s, -2.0),
-  up: s => eulerPose(-2.9, 0, 0.35 * s, -0.3),
+  up: s => eulerPose(-2.7, 0, 0.7 * s, -0.3),              // arms up and out, so the hands show beside the cap instead of behind the head
 };
 const _m4 = new THREE.Matrix4(), _ax = new THREE.Vector3(), _ay = new THREE.Vector3(), _az = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3();
 function reachPose(arm, target) {            // target in torso space; returns a pose whose hand lands on (or points at) the target
@@ -1361,7 +1386,7 @@ function bfGround(size) {                                       // where he runs
 function bfUpdate(t, dt) {
   if (!bf.g.visible) return;
   const size = settings.size, k = t - bf.t0, sd = bf.seed;
-  const cap = tmp.set(0, 0.56, -0.05); capG.localToWorld(cap);              // just above the crown button (the cap rim sits 0.07 below capG)
+  const cap = tmp.set(0, CAP.h - 0.05, -0.05); capG.localToWorld(cap);        // just above the crown button (the cap rim sits 0.07 below capG)
   let p;
   if (bf.leave && t - bf.leave > 0) {                                    // flies away up and off
     const q = t - bf.leave; p = bf.pos.clone().add(new THREE.Vector3(Math.sin(q * 3) * 0.02 + 0.03, 0.04, 0).multiplyScalar(size * 40 * dt));
@@ -2599,13 +2624,13 @@ function update(dt) {
   const winkEye = 1;                                            // winks with his right eye (viewer's right)
   const fs = {
     squash: [0, 1].map(i => (1 - S.blink) * (1 - (i === winkEye ? mood.wink * 0.95 : 0)) * (1 - 0.12 * squint)),
-    lid: [0, 1].map(i => clamp(0.12 * (1 - busy) * (1 - mood.surprise) + (i === 1 ? 0.45 : 0.05) * S.think + 0.5 * inhale + 0.3 * exhale, 0, 0.8)),
+    lid: [0, 1].map(i => clamp(0.2 * (1 - busy) * (1 - mood.surprise) + (i === 1 ? 0.45 : 0.05) * S.think + 0.5 * inhale + 0.3 * exhale, 0, 0.8)),   // resting lids a little heavy: unimpressed, not wide-eyed
     lower: [0, 1].map(i => clamp(0.35 * happy + 0.25 * mood.smirk * (i === 1 ? 1 : 0.2) + (i === 1 ? 0.3 : 0) * S.think + 0.2 * squint - 0.3 * mood.surprise, 0, 0.85)),
     wide: 0.25 * mood.surprise - 0.08 * S.think,
     gx: S.gaze.x, gy: S.gaze.y,
     pupil: 1 + 0.15 * mood.surprise - 0.1 * S.think + 0.05 * Math.sin(t * 1.1),
     browY: [0, 1].map(i => (i === 0 ? 0.9 : -0.35) * S.think + 0.9 * mood.surprise + 0.6 * level * S.talk + (i === 1 ? 0.5 : 0) * mood.smirk - 0.2 * inhale),
-    browTilt: [0, 1].map(i => 0.25 + (i === 0 ? -0.6 : 0.35) * S.think - 0.3 * mood.surprise + 0.15 * S.talk * level),
+    browTilt: [0, 1].map(i => 0.16 + (i === 0 ? -0.6 : 0.35) * S.think - 0.3 * mood.surprise + 0.15 * S.talk * level),
     blush: 0.3 + 0.4 * happy + 0.3 * S.talk,
     mouth: {
       open: clamp(talkOpen + 0.5 * mood.surprise * (1 - S.talk) + 0.25 * exhale, 0, 1),
@@ -2708,8 +2733,8 @@ function update(dt) {
   if (t > nextGesture) { talkGesture = { n: Math.random() < 0.55 ? Math.random() : 0, p: Math.random() < 0.6 ? Math.random() : 0, k: Math.random() }; nextGesture = t + rand(0.7, 2); }
   const gN = talkGesture.n * S.talk * (0.35 + level), gP = talkGesture.p * S.talk * (0.35 + level);
   const pick = k => k < 0.4 ? "gestureOut" : k < 0.7 ? "gestureUp" : k < 0.85 ? "gesturePoint" : "shrug";
-  const walkN = eulerPose(-step * 0.65 * mv + 0.05, 0, -0.18, -0.3 - 0.4 * mv);
-  const walkP = eulerPose(step * 0.65 * mv + 0.05, 0, 0.18, -0.3 - 0.4 * mv);
+  const walkN = eulerPose(-step * 0.65 * mv, 0, -0.12, -0.5 - 0.3 * mv);
+  const walkP = eulerPose(step * 0.65 * mv, 0, 0.12, -0.5 - 0.3 * mv);
   let pN = blendPose(walkN, POSE[pick(talkGesture.k)](-1), clamp(gN, 0, 1));
   let pP = blendPose(walkP, POSE[pick(1 - talkGesture.k)](1), clamp(gP, 0, 1));
   if (S.think > 0.01) {
@@ -2717,8 +2742,9 @@ function update(dt) {
     else pN = blendPose(pN, reachPose(armN, headPoint(-0.15, -0.85, thinkStyle === "pencil" ? 0.3 + 0.06 * Math.max(0, Math.sin(t * 14)) : 0.08)), S.think);   // hand on chin, or tapping a pencil on it
   }
   if (act.name === "drag") pP = blendPose(pP, reachPose(armP, headPoint(0.3, -0.72, 0.2)), Math.sin(Math.min(1, ap / 0.75) * Math.PI) ** 0.5);  // hand to the cigarette
-  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.0, 0.2 + Math.sin(t * 16) * 0.04, 0.12)), w); }   // the temple, not the crown
-  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.2, 0.22)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the bill at the side of his head (the bill's side sits near head y 0.1)
+  const gS = act.side || 1, gA = gS < 0 ? armN : armP;                                   // the hand that scratches or fixes the cap
+  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5, p = reachPose(gA, headPoint(0.88 * gS, 0.1 + Math.sin(t * 16) * 0.04, 0.14)); if (gS < 0) pN = blendPose(pN, p, w); else pP = blendPose(pP, p, w); }   // the temple, forward enough that the hand shows
+  if (act.name === "cap") { const w = Math.sin(ap * Math.PI) ** 0.5, p = reachPose(gA, headPoint(0.85 * gS, 0.1, 0.22)); if (gS < 0) pN = blendPose(pN, p, w); else pP = blendPose(pP, p, w); }   // the bill's side-front corner; the head rolls toward the hand (below) so it is in reach
   if (act.name === "wave") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, eulerPose(-2.1, 0, 0.9 + Math.sin(t * 14) * 0.25, -1.0), w); }
   if (act.name === "stretch") { const w = Math.sin(ap * Math.PI) ** 0.5; pN = blendPose(pN, POSE.up(-1), w); pP = blendPose(pP, POSE.up(1), w); }
   if (S.hop > 0) { const hopQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.6, 0, 0)); pN.q.premultiply(hopQ); pP.q.premultiply(hopQ); }
@@ -2728,7 +2754,7 @@ function update(dt) {
   applyArm(armN, pN, dt, armRate); applyArm(armP, pP, dt, armRate);
 
   // head, with secondary bounce on the cap, hair and mustache
-  neck.rotation.set(S.nod + (act.name === "cap" ? -0.08 * Math.sin(ap * Math.PI) : 0) + 0.09 * inhale, S.headYaw - 0.1 * inhale, -S.tilt);
+  neck.rotation.set(S.nod + (act.name === "cap" ? -0.08 * Math.sin(ap * Math.PI) : 0) + 0.09 * inhale, S.headYaw - 0.1 * inhale, -S.tilt - (act.name === "cap" ? 0.22 * (act.side || 1) * Math.sin(ap * Math.PI) : 0));
   if (J.neckW > 0.001) { neck.rotation.x += J.neck[0] * J.neckW; neck.rotation.y += J.neck[1] * J.neckW; neck.rotation.z += J.neck[2] * J.neckW; }
   head.scale.set(1 + level * 0.012 * S.talk, 1 - level * 0.012 * S.talk, 1);
   const pitchV = (S.nod - prevHeadPitch) / Math.max(dt, 1e-3), yawV = (S.headYaw - prevHeadYaw) / Math.max(dt, 1e-3);
@@ -2750,7 +2776,7 @@ function update(dt) {
 
   // lights follow him so the shadow stays sharp wherever he walks
   const lx = byte.position.x, lz = byte.position.z;
-  key.target.position.set(lx, 0, lz); key.position.set(lx + 2.5, 5.5, lz + 4);
+  key.target.position.set(lx, 0, lz); key.position.set(lx + 2.5, 4.6, lz + 4.4);          // a little lower than before, so the bill does not put his eyes in shadow
   rim.target.position.set(lx, 1, lz); rim.position.set(lx - 3, 4, lz - 3);
   fill.target.position.set(lx, 1, lz); fill.position.set(lx - 3, 1.5, lz + 3);
 
