@@ -95,6 +95,8 @@
       <button class="ghost" data-ev="follow">Follow</button><button class="ghost" data-ev="hype">Hype</button><button class="ghost" data-ev="rip">RIP</button><button class="ghost" data-ev="redeem">Redeem</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px">These only play the animation and sound on the overlay. Gary won't say anything.</div>
+    <div class="row" style="margin-top:8px"><span style="font-size:12px;color:var(--muted)">Full alert, he talks too (the same path a real one takes):</span>
+      <button class="ghost" data-alert="raid">Raid</button><button class="ghost" data-alert="sub">Sub</button><button class="ghost" data-alert="bits">Bits</button><button class="ghost" data-alert="follow">Follow</button></div>
   </div>
   <div class="card"><label>Log</label><div id="log"></div></div>
 </main>
@@ -160,6 +162,8 @@ $("actSfx").onchange = () => { actState.sfx = $("actSfx").checked; sendActs(); }
 $("scene").onchange = () => { actState.scene = $("scene").value; actState.sceneAt = Date.now(); sendActs(); };
 const EV = { raid: { name: "raid", n: 42 }, sub: { name: "sub" }, resub: { name: "sub", months: 7 }, bits: { name: "bits", n: 500 }, follow: { name: "follow" }, hype: { name: "hype" }, rip: { name: "rip" }, redeem: { name: "redeem", title: "Hydrate" } };
 document.querySelectorAll("[data-ev]").forEach(b => b.onclick = () => send({ type: "avatar", set: { do: { ...EV[b.dataset.ev], who: $("evWho").value || "someone", at: Date.now() } } }));
+const ALERT = { raid: { viewers: 42 }, sub: { months: 1 }, bits: { kind: "cheer", bits: 500 }, follow: {} };
+document.querySelectorAll("[data-alert]").forEach(b => b.onclick = () => { const a = ALERT[b.dataset.alert]; send({ type: "alert", kind: b.dataset.alert, user: $("evWho").value || "someone", ...a }); });
 $("actGap").onchange = () => { actState.gap = Number($("actGap").value); sendActs(); };
 $("actProps").onchange = () => { actState.props = $("actProps").value; sendActs(); };
 
@@ -229,6 +233,7 @@ function addLog(line) {
   while (el.childNodes.length > 400) el.removeChild(el.firstChild);
   if (stick) el.scrollTop = el.scrollHeight;
 }
+let build = 0;   // the app's stamp of the page files: a different one after a restart means this page is old, so reload
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => {
@@ -239,7 +244,7 @@ function connect() {
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === "log") addLog(m.line);
-    if (m.type === "status") renderStatus(m);
+    if (m.type === "status") { if (m.build) { if (build && m.build !== build) { location.reload(); return; } build = m.build; } renderStatus(m); }
   };
   ws.onclose = () => {
     $("status").innerHTML = pill("Sidekick", "bad", "not connected, retrying");

@@ -37,6 +37,7 @@ const params = new URLSearchParams(location.search);
 const CAP_TEXT = params.get("cap") ?? "COCK";
 const DEMO = params.has("demo");
 let botName = params.get("name") || "Gary";   // replaced by the app's [bot] name on connect
+let overlayBuild = 0;                          // the app's stamp of the overlay files: a different one after a restart means reload
 const ZOOM = parseFloat(params.get("scale") || "1");
 if (params.get("bg")) document.documentElement.style.background = params.get("bg");
 
@@ -837,24 +838,29 @@ function applySettings(set = {}) {
       if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && !job.def.event && (!sceneAllows(job.name) || scene_().stick !== job.name)) endJob(); }   // the new scene ends whatever it doesn't allow (leaving gaming ends the desk job)
     }
   }
-  if (set.do && set.do.name && Math.abs(Date.now() - (set.do.at || 0)) < 15000) doActivity(set.do.name, set.do);   // one-shot from the control page or an app event (ignored when replayed later)
+  if (set.do && set.do.name) {                                     // one-shot from the control page or an app event (ignored when replayed later)
+    const fresh = Math.abs(Date.now() - (set.do.at || 0)) < 15000;
+    const result = fresh ? doActivity(set.do.name, set.do) : "ignored: older than 15 s";
+    tell({ type: "did", name: set.do.name, result: result || "started" });   // the app logs it, so a missing reaction can be traced
+  }
 }
 function doActivity(name, info = {}) {
   audioCtx();                                                       // a user-visible event: set up the audio context if it isn't yet
-  if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return; }
-  if (job && job.def.event && !(JOBS[name] && JOBS[name].event)) return;   // a stream event is playing: bits and redeems wait for it to end
+  if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return "stopped"; }
+  if (job && job.def.event && !(JOBS[name] && JOBS[name].event)) return "skipped: a stream event is playing";   // bits and redeems wait for it to end
   if (name === "redeem") {                                          // a channel point redeem: show it, and act it out if the title suggests something
     const title = String(info.title || "a redeem"), who = String(info.who || "someone");
     showBanner(`${who.toUpperCase()} REDEEMED ${title.toUpperCase()}`.slice(0, 48), "#2ec4b6", 4.5); sfx("chime");
     const hit = REDEEM_MAP.find(([re]) => re.test(title.toLowerCase()));
-    if (hit) { if (JOBS[hit[1]]?.prop && !PROPS[JOBS[hit[1]].prop]) return; setTimeout(() => doActivity(hit[1], info), 400); }
+    if (hit) { if (JOBS[hit[1]]?.prop && !PROPS[JOBS[hit[1]].prop]) return "skipped: the prop isn't loaded"; setTimeout(() => doActivity(hit[1], info), 400); }
     else { head.getWorldPosition(V1); for (let i = 0; i < 5; i++) floater(V1.clone().add(V2.set(rand(-0.8, 0.8), 0.6, 0).multiplyScalar(settings.size)), starTex, V3.set(0, 0.35, 0).multiplyScalar(settings.size)); startGesture(["dance", "airguitar", "sneeze", "yawn"][Math.floor(Math.random() * 4)]); }
     return;
   }
-  if (name === "embarrassed" && (job || act.name)) return;            // only when he is free
-  if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return; pendingInfo = info || {}; }
+  if (name === "embarrassed" && (job || act.name)) return "skipped: busy";   // only when he is free
+  if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return "skipped: turned off on the control page"; pendingInfo = info || {}; }
   if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; startGesture(name); }
   else if (JOBS[name]) { job = null; startJob(name, true); }
+  else return "ignored: unknown reaction";
 }
 {
   const m = params.get("mode"); if (m) applySettings({ mode: m });
@@ -866,6 +872,7 @@ function currentMode() { return (typeof SCENES !== "undefined" && SCENES[setting
 
 // websocket to the app, reconnecting with backoff (1 s growing to 10 s) whenever the app is down or restarts
 let wsDelay = 1000, wsTimer = null;
+function tell(o) { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} }   // a note back to the app, dropped while it is down
 function scheduleReconnect() {
   if (wsTimer) return;
   const d = wsDelay * (0.8 + Math.random() * 0.4);
@@ -881,7 +888,10 @@ function connect() {
     audioCtx();                                 // first message: set up the audio context now (audioCtx resumes it if suspended)
     let msg;
     try { msg = JSON.parse(ev.data); } catch (e) { console.error("bad frame from app", e); return; }
-    if (msg.type === "config") { if (msg.name) botName = msg.name; }
+    if (msg.type === "config") {
+      if (msg.name) botName = msg.name;
+      if (msg.build) { if (overlayBuild && msg.build !== overlayBuild) { location.reload(); return; } overlayBuild = msg.build; }
+    }
     else if (msg.type === "avatar") applySettings(msg.set || msg);
     else if (msg.type === "thinking") setThinking(true);
     else if (msg.type === "say") say(msg);

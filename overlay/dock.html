@@ -105,8 +105,10 @@
     <button class="danger" data-do="stop">Stop what he's doing</button>
     <div class="lbl">Stream mode</div>
     <select id="scene"><option value="normal">Normal</option><option value="starting">Starting soon</option><option value="brb">BRB</option><option value="chatting">Just chatting</option><option value="gaming">Gaming</option><option value="marble">Marble race</option><option value="chill">Chill</option><option value="party">Party</option><option value="ending">Ending</option></select>
-    <div class="lbl">Event test (animation only)</div>
+    <div class="lbl">Event test (animation only, he stays quiet)</div>
     <div class="grid four" id="evs"><button data-ev="raid">Raid</button><button data-ev="sub">Sub</button><button data-ev="bits">Bits</button><button data-ev="follow">Follow</button><button data-ev="hype">Hype</button><button data-ev="rip">RIP</button><button data-ev="redeem">Redeem</button></div>
+    <div class="lbl">Full alert test (he talks too, like a real one)</div>
+    <div class="grid four" id="alerts"><button data-alert="raid">Raid</button><button data-alert="sub">Sub</button><button data-alert="bits">Bits</button><button data-alert="follow">Follow</button></div>
   </div></details>
 
   <details data-k="fx"><summary>Voice FX on your mic</summary><div class="body">
@@ -248,6 +250,9 @@ $("acts").innerHTML = ACTS.map(([k, n]) => `<button data-do="${k}">${n}</button>
 
 const EV = { raid: { n: 42 }, sub: {}, bits: { n: 500 }, follow: {}, hype: {}, rip: {}, redeem: { title: "Hydrate" } };
 $("evs").querySelectorAll("button").forEach(b => b.onclick = () => { if (send({ type: "avatar", set: { do: { name: b.dataset.ev, who: "TestViewer", ...EV[b.dataset.ev], at: Date.now() } } })) flash(b); else hint(NOT_SENT); });
+// the full test goes through the same code a real Streamer.bot event does: Gary speaks about it and the overlay reacts
+const ALERT = { raid: { viewers: 42 }, sub: { months: 1 }, bits: { kind: "cheer", bits: 500 }, follow: {} };
+$("alerts").querySelectorAll("button").forEach(b => b.onclick = () => { const a = ALERT[b.dataset.alert]; if (send({ type: "alert", kind: b.dataset.alert, user: "TestViewer", ...a })) flash(b); else hint(NOT_SENT); });
 // the scene change keeps the server's other acts settings and stamps sceneAt for the stream-mode opener
 $("scene").onchange = () => { if (!send({ type: "avatar", set: { acts: { ...(avatar.acts || {}), scene: $("scene").value, sceneAt: Date.now() } } })) hint(NOT_SENT); };
 
@@ -297,12 +302,13 @@ function showStatus(m) {
   if (m.avatar) applyAvatar(m.avatar);
 }
 
+let build = 0;   // the app's stamp of the page files: a different one after a restart means this page is old, so reload
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => { dot("dWs", "ok"); send({ type: "hello", role: "control" }); };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if (m.type === "status") showStatus(m);
+    if (m.type === "status") { if (m.build) { if (build && m.build !== build) { location.reload(); return; } build = m.build; } showStatus(m); }
   };
   ws.onclose = () => { dot("dWs", ""); $("state").className = "off"; $("state").textContent = "Sidekick isn't running"; setTimeout(connect, 2000); };
 }

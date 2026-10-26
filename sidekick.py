@@ -35,6 +35,18 @@ from tts import TTS, wav_seconds
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(BASE, "overlay")
+
+
+def overlay_build():
+    """A stamp of the overlay pages on disk. Pages open in OBS compare it after a restart and reload themselves
+    when the files changed, so an update never needs a manual refresh of the browser source or the dock."""
+    try:
+        return max(int(os.path.getmtime(os.path.join(OVERLAY, f))) for f in os.listdir(OVERLAY) if f.endswith(".html"))
+    except Exception:
+        return 0
+
+
+OVERLAY_BUILD = overlay_build()
 log = logging.getLogger("sidekick")
 
 
@@ -283,7 +295,7 @@ class Sidekick:
             "type": "status", "lm": self.lm_status, "paused": self.paused, "overlays": len(self.overlays),
             "streamerbot": None if self.sb is None else self.sb.connected,
             "actions": [a["name"] for a in self.sb.actions] if self.sb else [],
-            "avatar": self.avatar, "features": self.features.status(),
+            "avatar": self.avatar, "features": self.features.status(), "build": OVERLAY_BUILD,
         }
 
     async def push_status(self):
@@ -335,7 +347,7 @@ class Sidekick:
                     role = msg.get("role")
                     if role == "overlay":
                         self.overlays.add(ws)
-                        await ws.send_json({"type": "config", "name": self.bot["name"]})
+                        await ws.send_json({"type": "config", "name": self.bot["name"], "build": OVERLAY_BUILD})
                         await ws.send_json({"type": "avatar", "set": self.avatar})
                         log.info("Overlay connected")
                     else:
@@ -369,12 +381,24 @@ class Sidekick:
                     self.done.set()
                 elif t == "avatar":
                     change = msg.get("set") or {}
+                    do = change.get("do")
+                    if isinstance(do, dict) and do.get("name"):
+                        log.info("Overlay reaction asked by the control page: %s", do["name"])
                     acts = change.get("acts")
                     if isinstance(acts, dict) and "scene" in acts and "sceneAt" not in acts:
                         acts["sceneAt"] = int(time.time() * 1000)   # when the scene was picked, so an old pick isn't replayed
                     self.store_avatar(change)
                     await self.send_overlays({"type": "avatar", "set": change})
                     await self.push_status()
+                elif t == "did":
+                    # the overlay says what it did with a one-shot reaction, so a missing animation can be traced in the log
+                    log.info("Overlay: %s %s", msg.get("name"), msg.get("result") or "started")
+                elif t == "alert":
+                    # a full alert test from the dock or control page: the very path a Streamer.bot raid/sub/cheer takes
+                    kind = str(msg.get("kind") or "")
+                    if kind in ("raid", "sub", "resub", "gift", "giftbomb", "cheer", "follow"):
+                        log.info("Alert test from the control page: %s", kind)
+                        await self.features.api(kind, msg)
                 elif t == "refresh":
                     if self.sb:
                         await self.sb.refresh_actions()
