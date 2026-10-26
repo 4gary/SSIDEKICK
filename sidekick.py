@@ -42,6 +42,7 @@ class Sidekick:
         self.last_spoke = 0.0
         self.last_unprompted = 0.0
         self.busy = False
+        self.spoke_until = 0.0   # mic lines heard before this are Gary's own voice coming back through the mic
         self.paused = False
         self.overlays, self.controls = set(), set()
         self.audio = collections.OrderedDict()
@@ -82,8 +83,8 @@ class Sidekick:
             self.want_chat = True
 
     async def on_streamer(self, text, spoken=False):
-        if spoken and self.busy and not self.features.is_hush(text):
-            return   # heard while Gary is talking: only "Gary, hold that thought" and the like count
+        if spoken and (self.busy or time.monotonic() < self.spoke_until) and not self.features.is_hush(text):
+            return   # heard while Gary is talking (or just after, while his voice is still in the mic): only "Gary, hold that thought" and the like count
         who = self.bot["streamer_name"]
         log.info("[%s] %s: %s", "mic" if spoken else "you", who, text)
         self.remember(who, text, "streamer")
@@ -201,6 +202,7 @@ class Sidekick:
             log.warning("No overlay connected, so nobody hears this. Add http://localhost:%d as an OBS Browser Source.",
                         self.cfg["server"]["port"])
         self.done.clear()
+        self.spoke_until = time.monotonic() + secs + 3   # the mic can hear the speakers for a few seconds after
         await self.send_overlays({"type": "say", "text": text, "audio": url, "seconds": secs})
         try:
             await asyncio.wait_for(self.done.wait(), secs + 5)
