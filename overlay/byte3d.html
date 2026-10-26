@@ -815,7 +815,8 @@ async function say(msg) {
 }
 
 // avatar settings (mode, home spot, size) come from the control page through the app, or from the URL
-const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, hiddenUntil: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
+const PROPS = {};   // filled in by the prop loader below; declared up here because applySettings can run at module start (?size=)
+const nav ={ x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, hiddenUntil: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
 const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1 };
 function applySettings(set = {}) {
   if (set.mode && ["stay", "wander", "roam", "walkon"].includes(set.mode)) { settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true; }
@@ -1107,7 +1108,6 @@ const PROP_SLOTS = {
   plant:  { fx: 0.55,  fz: 0.55, yaw: -0.2, half: 0.3 },
   easel:  { fx: -0.55, fz: 0.4,  yaw: 0.3,  half: 0.6 },
 };
-const PROPS = {};
 let headphones = null;
 for (const name of Object.keys(PROP_SLOTS)) {
   import(`./props/${name}.js`).then(m => {
