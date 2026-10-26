@@ -835,13 +835,15 @@ function applySettings(set = {}) {
     if (typeof a.sfx === "boolean") settings.acts.sfx = a.sfx;
     if (typeof a.scene === "string" && SCENES[a.scene] && a.scene !== settings.acts.scene) {
       settings.acts.scene = a.scene;
-      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && job.def.manual && !job.def.event) endJob(); }
+      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && !job.def.event && (!sceneAllows(job.name) || scene_().stick !== job.name)) endJob(); }   // the new scene ends whatever it doesn't allow (leaving gaming ends the desk job)
     }
   }
   if (set.do && set.do.name && Math.abs(Date.now() - (set.do.at || 0)) < 15000) doActivity(set.do.name, set.do);   // one-shot from the control page or an app event (ignored when replayed later)
 }
 function doActivity(name, info = {}) {
+  audioCtx();                                                       // a user-visible event: set up the audio context if it isn't yet
   if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return; }
+  if (job && job.def.event && !(JOBS[name] && JOBS[name].event)) return;   // a stream event is playing: bits and redeems wait for it to end
   if (name === "redeem") {                                          // a channel point redeem: show it, and act it out if the title suggests something
     const title = String(info.title || "a redeem"), who = String(info.who || "someone");
     showBanner(`${who.toUpperCase()} REDEEMED ${title.toUpperCase()}`.slice(0, 48), "#2ec4b6", 4.5); sfx("chime");
@@ -1758,7 +1760,8 @@ function eventStart(name, info, size) {
   }
   job.at = { x: nav.x, z: nav.z };
   const B = {
-    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"], sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : `NEW SUB: ${who}!`, "#8a5cff"],
+    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"],
+    sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : n > 1 ? `${n} GIFT SUBS FROM ${who}!` : `NEW SUB: ${who}!`, "#8a5cff"],
     bits: [`${n ? n + " " : ""}BITS FROM ${who}!`, "#ffb300"], follow: [`THANKS FOR THE FOLLOW, ${who}!`, "#2ec4b6"], hype: ["CHAT IS HYPED!", "#ff6b00"], rip: ["RIP DUM  o7", "#6b7280"],
   }[name];
   showBanner(B[0], B[1], (job.until - S.t) - 0.4);
