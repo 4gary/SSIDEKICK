@@ -68,13 +68,13 @@ away_activities = ["nap", "couch", "dj", "arcade", "phone", "lieback"]   # what 
 
 [scene_modes]
 # OBS scene name -> 3D Gary's stream mode (first match wins, regex, case-insensitive). No match = normal.
+marble = 'marble'
 ending = '\b(ending|outro|end screen|that.?s the show|goodbye)\b'
 starting = '\b(starting|soon|intro)\b'
 brb = '\b(brb|be right back|break|away)\b'
-marble = 'marble'
 party = '\b(party|disco|dance)\b'
 chill = '\b(chill|lofi|cozy)\b'
-gaming = '\b(game|gaming|gameplay)\b'
+gaming = '\b(games?|gaming|gameplay)\b'
 chatting = '\b(chat|chatting|camera|cam|talk)\b'
 
 [crowd]
