@@ -3,15 +3,21 @@
 Chat (Streamer.bot or Twitch) -> Qwen in LM Studio -> local TTS -> talking avatar browser source.
 Run:  python sidekick.py
 """
+import os
+
+# Must be set before numpy / faster-whisper load: otherwise their console handler ends the process on Ctrl+C
+# before our own handler (below) can save memory and features.
+os.environ.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
+
 import asyncio
 import collections
 import copy
 import json
 import logging
 import logging.handlers
-import os
 import random
 import re
+import signal
 import sys
 import time
 import tomllib
@@ -506,16 +512,32 @@ def main():
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
     sk = None
+    stop = {}   # the loop and the main task, so a Ctrl+C / Ctrl+Break handler can ask the loop to stop
+
+    def on_stop_signal(signum, frame):
+        # Ctrl+C or Ctrl+Break (Windows): cancel the main task so the save below still runs
+        if "loop" in stop:
+            stop["loop"].call_soon_threadsafe(stop["task"].cancel)
 
     async def start():
         nonlocal sk
+        stop["loop"], stop["task"] = asyncio.get_running_loop(), asyncio.current_task()
+        signal.signal(signal.SIGINT, on_stop_signal)
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, on_stop_signal)
         sk = Sidekick(cfg)
         panel.sidekick = sk
-        await sk.run()
+        try:
+            await sk.run()
+        except asyncio.CancelledError:
+            log.info("Stopping: saving memory and features")
+            sk.memory.save()
+            sk.features.save()
+            raise
 
     try:
         asyncio.run(start())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
         if sk:
