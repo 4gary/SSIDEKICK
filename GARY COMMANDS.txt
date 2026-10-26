@@ -25,7 +25,8 @@ You can also switch these and turn single activities on/off on the control page
 
 QUIET / PAUSE
 -------------
-  "Gary, hold that thought" / "hang on" / "wait" / "stop"   cuts him off mid-line
+  "Gary, hold that thought" / "hang on" / "wait" / "stop" / "stop it"   cuts him off mid-line
+  (while he's talking. Stop it only cuts him off; it doesn't mute him)
   "Gary, go ahead" / "what were you saying"                  finishes the line you cut off
   "Gary, stop talking for 15 minutes"                        muted for that long (max 60)
   "Gary, be quiet" / "shut up" / "shush"                     muted until you call him back
@@ -39,7 +40,8 @@ While muted he ignores chat but still reacts to follows, subs, bits, raids and r
 VOICE EFFECTS (on you, through Streamer.bot)
 --------------------------------------------
   "Gary, robot voice me" / "give me the helium voice" / "make me deep voice"
-  Voices: robot, helium, deep, echo, alien
+  Voices: robot, helium, deep, echo, alien. The Streamer.bot action needs the word voice in its name
+  (like ROBOT VOICE), so a Robot Dance Clip action is never used as a voice.
   "Gary, random voice please"                                he picks one
   "Gary, normal voice" / "turn off the voice"                back to normal
 He sometimes puts one on you by himself (every 20+ minutes at most).
@@ -64,32 +66,38 @@ GAMES
   "Gary, start a poll: pizza or tacos or sushi"              poll with your options
   "Gary, start a poll about snacks"                          he makes one up
   "Gary, end the poll"
-  "Gary, trivia time"  /  "Gary, trivia about movies, 5 rounds"  /  "Gary, stop trivia"
+  "Gary, trivia time"  /  "Gary, trivia about movies"  /  "Gary, trivia about movies, five rounds"  /  "Gary, stop trivia"
+  (rounds or questions: a number or one to ten in words; the words trivia night alone do not start it)
   "Gary, start a prediction: will I beat the boss"
   "Gary, lock the prediction" / "Gary, cancel the prediction"
   "Gary, the answer is yes" / "Gary, option 2 won"           pays out the prediction
+  (the answer must be one of the options; an answer like no idea does nothing)
   "Gary, who's winning" / "leaderboard"                      points leaderboard
 Chat: types 1/2/3 or !vote 2 for polls, a/b/c/d for trivia, !pick <name> for predictions and races.
 
 
 MARBLE RACES
 ------------
-  "Gary, the marble race is starting"  /  "Gary, start a race"
-  "Gary, Kevin won"  /  "Gary, the winner is Kevin"
+  "Gary, the marble race is starting"  /  "Gary, start a race"       (adding soon to the end does not start one)
+  "Gary, Kevin won"  /  "Gary, the winner is Kevin"               (only while a race is running)
   "Gary, the race is over"
 
 
 CLIPS, VISION, RECAP
 --------------------
   "Gary, clip that"                                          runs the Clip It action and saves the moment
-  "Gary, look at this" / "what do you see" / "watch this"    he looks at the stream and reacts
+  (the Streamer.bot action needs the word clip in its name)
+  "Gary, look at this" / "what do you see" / "watch this" / "see this on screen"
+                                                             he looks at the stream and reacts
+                                                             (if vision is off or OBS is down, he says so)
   "Gary, recap the stream" / "wrap it up"                    end-of-stream recap
 
 
 SCENES (automatic, no command)
 ------------------------------
 OBS scene names change his mode: starting, brb, chatting, gaming, marble, chill, party, ending.
-Scenes with "news" or "weather" in the name make him the DUMSTREAM News co-anchor / Weather guy.
+If a name fits more than one, the first in features.toml [scene_modes] wins: a scene called Marble Starting Soon is marble.
+Scenes with "news" or "weather" as a word in the name make him the DUMSTREAM News co-anchor / Weather guy.
 
 
 TEST LINKS (paste in a browser while Gary is running)

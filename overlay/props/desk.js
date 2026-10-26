@@ -3,38 +3,11 @@
 // angled toward him, so the viewer sees it at a glancing angle and his face stays clear of it.
 // The screen is an emissive canvas; the desk lamp is the one PointLight.
 
+import { clamp, disposeTree, rbox, rr } from './common.js';
+
 export function build(THREE, ctx) {
   const { mesh, group, canvasTex } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const bounce = (v, max) => { const p = ((v % (2 * max)) + 2 * max) % (2 * max); return p < max ? p : 2 * max - p; };
-
-  // Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r).
-  // Normals are set analytically so edges shade smoothly. bottomOrigin moves the origin to the bottom face.
-  function rbox(w, h, d, r, seg = 12, bottomOrigin = false) {
-    const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-    const hx = w / 2, hy = h / 2, hz = d / 2;
-    const rr = Math.min(r, hx, hy, hz);
-    const ax = hx - rr, ay = hy - rr, az = hz - rr;
-    const P = g.attributes.position, N = g.attributes.normal;
-    const n = new THREE.Vector3();
-    for (let i = 0; i < P.count; i++) {
-      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-      const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-      n.set(x - qx, y - qy, z - qz).normalize(); // surface vertices always have a non-zero offset
-      P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-      N.setXYZ(i, n.x, n.y, n.z);
-    }
-    P.needsUpdate = true; N.needsUpdate = true;
-    if (bottomOrigin) g.translate(0, hy, 0);
-    return g;
-  }
-
-  // Canvas helper: rounded rectangle path
-  function rr(g, x, y, w, h, r) {
-    g.beginPath(); g.moveTo(x + r, y);
-    g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
-  }
 
   const TOP = 0.72;                                        // desk top surface
   const CX = -0.1, CZ = -0.55;                             // chair / Gary's seat centre
@@ -190,16 +163,16 @@ export function build(THREE, ctx) {
 
   // ---------- desk ----------
   // Top slab: top surface at TOP. Face index 2 (+y) carries the wood canvas.
-  mesh(rbox(1.5, 0.06, 0.6, 0.025, 6), [deskMat, deskMat, woodMat, deskMat, deskMat, deskMat], root, [0, TOP - 0.03, 0]);
+  mesh(rbox(THREE, 1.5, 0.06, 0.6, 0.025, 6), [deskMat, deskMat, woodMat, deskMat, deskMat, deskMat], root, [0, TOP - 0.03, 0]);
   // Chunky side panels down to the floor
-  for (const x of [-0.7, 0.7]) mesh(rbox(0.07, 0.66, 0.56, 0.03, 4), deskMat, root, [x, 0.33, 0]);
+  for (const x of [-0.7, 0.7]) mesh(rbox(THREE, 0.07, 0.66, 0.56, 0.03, 4), deskMat, root, [x, 0.33, 0]);
   // Front modesty panel with the DUM sticker on its +z face
-  mesh(rbox(1.36, 0.46, 0.04, 0.02, 4), [deskMat, deskMat, deskMat, deskMat, stickerMat, deskMat], root, [0, 0.4, 0.27]);
+  mesh(rbox(THREE, 1.36, 0.46, 0.04, 0.02, 4), [deskMat, deskMat, deskMat, deskMat, stickerMat, deskMat], root, [0, 0.4, 0.27]);
 
   // ---------- keyboard and mouse ----------
   const KB_X = CX, KB_Z = 0.05;
-  mesh(rbox(0.48, 0.026, 0.18, 0.012, 4), kbTrayMat, root, [KB_X, TOP + 0.013, KB_Z]);
-  const keyGeo = rbox(0.036, 0.016, 0.032, 0.007, 2);
+  mesh(rbox(THREE, 0.48, 0.026, 0.18, 0.012, 4), kbTrayMat, root, [KB_X, TOP + 0.013, KB_Z]);
+  const keyGeo = rbox(THREE, 0.036, 0.016, 0.032, 0.007, 2);
   const keys = [];
   const KEY_Y = TOP + 0.034;
   for (let row = 0; row < 4; row++) {
@@ -211,16 +184,16 @@ export function build(THREE, ctx) {
       keys.push(m);
     }
   }
-  mesh(rbox(0.18, 0.006, 0.16, 0.02, 2), padMat, root, [0.26, TOP + 0.003, 0.1]);          // mouse pad
-  mesh(rbox(0.065, 0.028, 0.1, 0.03, 4), mouseMat, root, [0.26, TOP + 0.02, 0.1]);          // mouse
+  mesh(rbox(THREE, 0.18, 0.006, 0.16, 0.02, 2), padMat, root, [0.26, TOP + 0.003, 0.1]);          // mouse pad
+  mesh(rbox(THREE, 0.065, 0.028, 0.1, 0.03, 4), mouseMat, root, [0.26, TOP + 0.02, 0.1]);          // mouse
 
   // ---------- monitor: off to the right, angled toward Gary ----------
   const MON_X = 0.5, MON_Z = -0.02, MON_YAW = -1.0;
   const mon = group(root, [MON_X, TOP, MON_Z]);
   mon.rotation.y = MON_YAW;
   mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.025, 18), standMat, mon, [0, 0.0125, 0]);   // foot
-  mesh(rbox(0.04, 0.22, 0.03, 0.012, 3), standMat, mon, [0, 0.135, -0.03]);                // neck
-  mesh(rbox(0.6, 0.38, 0.05, 0.03, 6), [bezelMat, bezelMat, bezelMat, bezelMat, bezelMat, backPlateMat], mon, [0, 0.33, 0]);
+  mesh(rbox(THREE, 0.04, 0.22, 0.03, 0.012, 3), standMat, mon, [0, 0.135, -0.03]);                // neck
+  mesh(rbox(THREE, 0.6, 0.38, 0.05, 0.03, 6), [bezelMat, bezelMat, bezelMat, bezelMat, bezelMat, backPlateMat], mon, [0, 0.33, 0]);
   mesh(new THREE.PlaneGeometry(0.54, 0.34), screenMat, mon, [0, 0.33, 0.0265]);
 
   // ---------- desk lamp at the back-left, warm glow (the one PointLight) ----------
@@ -255,15 +228,15 @@ export function build(THREE, ctx) {
 
   // ---------- gaming chair behind the desk ----------
   // Seat pan: top at y 0.48 under Gary's hips
-  mesh(rbox(0.56, 0.1, 0.5, 0.04, 6), [chairMat, chairMat, chairAccMat, chairMat, chairMat, chairMat], root, [CX, 0.43, CZ]);
+  mesh(rbox(THREE, 0.56, 0.1, 0.5, 0.04, 6), [chairMat, chairMat, chairAccMat, chairMat, chairMat, chairMat], root, [CX, 0.43, CZ]);
   // Backrest: leans back ~0.12 rad, front face just behind Gary's back; top at ~1.24
   const chairBack = group(root, [CX, 0.48, -0.82]);
   chairBack.rotation.x = -0.12;
-  mesh(rbox(0.54, 0.76, 0.1, 0.05, 6), [chairMat, chairMat, chairAccMat, chairMat, chairMat, chairMat], chairBack, [0, 0.38, -0.05]);
+  mesh(rbox(THREE, 0.54, 0.76, 0.1, 0.05, 6), [chairMat, chairMat, chairAccMat, chairMat, chairMat, chairMat], chairBack, [0, 0.38, -0.05]);
   // Armrests on short posts
   for (const x of [CX - 0.42, CX + 0.42]) {
     mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.14, 8), chairDarkMat, root, [x, 0.53, CZ]);
-    mesh(rbox(0.05, 0.03, 0.3, 0.012, 3), chairMat, root, [x, 0.615, CZ - 0.02]);
+    mesh(rbox(THREE, 0.05, 0.03, 0.3, 0.012, 3), chairMat, root, [x, 0.615, CZ - 0.02]);
   }
   // Gas lift, hub and five-star base on casters
   mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.31, 10), chairDarkMat, root, [CX, 0.205, CZ]);
@@ -271,7 +244,7 @@ export function build(THREE, ctx) {
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
     const dx = Math.cos(a), dz = Math.sin(a);
-    mesh(rbox(0.26, 0.03, 0.05, 0.012, 2), chairDarkMat, root, [CX + dx * 0.12, 0.03, CZ + dz * 0.12], [1, 1, 1], [0, -a, 0]);
+    mesh(rbox(THREE, 0.26, 0.03, 0.05, 0.012, 2), chairDarkMat, root, [CX + dx * 0.12, 0.03, CZ + dz * 0.12], [1, 1, 1], [0, -a, 0]);
     mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.026, 10), chairDarkMat, root,
       [CX + dx * 0.25, 0.026, CZ + dz * 0.25], [1, 1, 1], [0, 0, Math.PI / 2]);
   }
@@ -321,7 +294,7 @@ export function build(THREE, ctx) {
       }
     },
     dispose() {
-      root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      disposeTree(root, ctx.sphere);
       lowSphere.dispose();
       for (const m of mats) m.dispose();
       for (const tx of [woodTex, stickerTex, mugTex, screenTex]) tx.dispose();

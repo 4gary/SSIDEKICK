@@ -19,8 +19,7 @@
 <script type="importmap">
 { "imports": {
   "three": "./lib/three/build/three.module.min.js",
-  "three/addons/": "./lib/three/examples/jsm/",
-  "@pixiv/three-vrm": "./lib/three-vrm/three-vrm.module.min.js"
+  "three/addons/": "./lib/three/examples/jsm/"
 } }
 </script>
 </head>
@@ -33,11 +32,12 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?vrm=0  ?bg=#4a7fb5  ?yaw=0.6
+// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
 const params = new URLSearchParams(location.search);
 const CAP_TEXT = params.get("cap") ?? "COCK";
 const DEMO = params.has("demo");
 let botName = params.get("name") || "Gary";   // replaced by the app's [bot] name on connect
+let overlayBuild = 0;                          // the app's stamp of the overlay files: a different one after a restart means reload
 const ZOOM = parseFloat(params.get("scale") || "1");
 if (params.get("bg")) document.documentElement.style.background = params.get("bg");
 
@@ -99,6 +99,9 @@ function resize() {
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   computeStage();
+  for (const p of Object.values(PROPS)) if (p.shown) placeProp(p);      // shown props follow the new frame
+  const band = xMaxAt(nav.z, settings.size) + 2.2 * settings.size;       // still on the stage, or just past the edge where roam and walk-on wait
+  nav.x = clamp(nav.x, -band, band);
   bubble.style.maxWidth = stage.wide ? Math.min(520, w * 0.4) + "px" : "90%";
   bubble.style.fontSize = stage.wide ? "22px" : "19px";
 }
@@ -134,9 +137,9 @@ key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 key.shadow.camera.left = -3; key.shadow.camera.right = 3; key.shadow.camera.top = 3.5; key.shadow.camera.bottom = -1.5;
 key.shadow.camera.near = 0.5; key.shadow.camera.far = 20;
-key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025; key.shadow.radius = 5;
+key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025;
 scene.add(key); scene.add(key.target);
-const rim = new THREE.DirectionalLight(0xbfe0ff, 1.5);
+const rim = new THREE.DirectionalLight(0xbfe0ff, 2.0);   // from behind (the update loop keeps it at his back-left)
 scene.add(rim); scene.add(rim.target);
 const fill = new THREE.DirectionalLight(0xffd6c0, 0.55);
 scene.add(fill); scene.add(fill.target);
@@ -325,7 +328,6 @@ const M = {
   hair: new THREE.MeshStandardMaterial({ color: 0x5a3418, roughness: 0.85, bumpMap: fuzzBump, bumpScale: 2 }),
   stache: new THREE.MeshStandardMaterial({ color: 0x3f2310, roughness: 0.9 }),
   face: null,
-  cornea: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.06, clearcoat: 1, transparent: true, opacity: 0.16, depthWrite: false }),
   shirt: new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.9, bumpMap: fuzzBump, bumpScale: 0.4 }),
   jeans: new THREE.MeshStandardMaterial({ map: denimTex, roughness: 0.95 }),
   shoe: new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.55 }),
@@ -355,23 +357,24 @@ const hips = group(squash, [0, 0.46, 0]);
 const torso = group(hips);
 
 // body: a chubby lathe, striped tee, dark collar, belt line
-const bodyProfile = [[0.30, 0.0], [0.335, 0.12], [0.34, 0.28], [0.325, 0.44], [0.29, 0.56], [0.22, 0.64], [0.14, 0.69], [0.0, 0.70]]
+const bodyProfile = [[0.31, 0.0], [0.37, 0.12], [0.40, 0.28], [0.385, 0.44], [0.33, 0.57], [0.24, 0.65], [0.13, 0.70], [0.0, 0.70]]
   .map(([r, y]) => new THREE.Vector2(r, y));
-const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.145, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.685, 0.0], [1, 1, 0.86], [Math.PI / 2, 0, 0]);
-mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.14, 24), M.skin, torso, [0, 0.72, 0.0]);          // neck
-mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
+const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.95]);
+mesh(new THREE.TorusGeometry(0.165, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.68, 0.0], [1, 1, 0.95], [Math.PI / 2, 0, 0]);
+mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.2, 24), M.skin, torso, [0, 0.64, 0.0]);          // short neck: shows between the chin and the collar
+mesh(new THREE.CylinderGeometry(0.35, 0.32, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.95]);
+mesh(new THREE.TorusGeometry(0.345, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.95], [Math.PI / 2, 0, 0]); // belt
 
 // arms: shoulder + elbow pivots so they bend naturally
+const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.30 * side, 0.58, 0]);
-  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
-  mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.068, 0.16, 8, 16), M.skin, sh, [0, -0.18, 0]);   // upper arm
-  const el = group(sh, [0, -0.26, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.062, 0.17, 8, 16), M.skin, el, [0, -0.1, 0]);    // forearm
-  const hand = group(el, [0, -0.22, 0]);
+  const sh = group(torso, [0.36 * side, 0.62, 0]);
+  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.14, 0.13, 0.13]);                                 // sleeve cap
+  mesh(new THREE.CylinderGeometry(0.11, 0.10, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);        // short sleeve
+  const up = mesh(new THREE.CapsuleGeometry(0.08, ARM_L1 - 0.12, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
+  const el = group(sh, [0, -ARM_L1, 0]);
+  const fore = mesh(new THREE.CapsuleGeometry(0.073, ARM_L2 - 0.106, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
+  const hand = group(el, [0, -ARM_L2, 0]);
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
   for (let i = 0; i < 3; i++) mesh(sphere, M.skin, hand, [(i - 1) * 0.045, -0.11, 0.01], [0.028, 0.035, 0.028]);  // finger bumps
@@ -382,9 +385,9 @@ const armN = arm(-1), armP = arm(1);              // armP holds the cigarette si
 
 function leg(side) {
   const hp = group(hips, [0.135 * side, 0.0, 0]);
-  mesh(new THREE.CapsuleGeometry(0.1, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);            // thigh
+  mesh(new THREE.CapsuleGeometry(0.12, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);           // thigh
   const kn = group(hp, [0, -0.21, 0]);
-  mesh(new THREE.CapsuleGeometry(0.088, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
+  mesh(new THREE.CapsuleGeometry(0.105, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
   const ft = group(kn, [0, -0.2, 0]);
   mesh(sphere, M.shoe, ft, [0, -0.0, 0.04], [0.115, 0.075, 0.165]);                           // sneaker body
   mesh(sphere, M.shoe, ft, [0, -0.01, 0.13], [0.1, 0.06, 0.09]);                              // toe cap
@@ -399,7 +402,7 @@ const neck = group(torso, [0, 0.70, 0]);
 const head = new THREE.Group(); head.position.y = 0.45;
 const HA = 0.66, HB = 0.60, HC = 0.62;          // head ellipsoid radii
 mesh(sphere, M.skin, head, [0, 0, 0], [HA, HB, HC]);
-mesh(sphere, M.skin, head, [0, -0.3, 0.05], [0.53, 0.3, 0.47]);  // chubby jaw/cheeks
+mesh(sphere, M.skin, head, [0, -0.28, 0.0], [0.62, 0.32, 0.40]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
 mesh(sphere, M.skin, head, [0, -0.25, 0.59], [0.07, 0.06, 0.065]);  // nose
 
 function onFace(obj, az, el, off = 0) {         // place on the head surface at azimuth/elevation (radians), local +z = surface normal
@@ -448,18 +451,13 @@ const F2P = {                                                    // face angle -
   s: FACE.W / (FACE.az1 - FACE.az0),                              // pixels per radian
 };
 const EYE = { az: 0.4, el: -0.26, w: 0.3, h: 0.27 };          // big banner eyes
-for (const side of [-1, 1]) {                                   // glossy corneas catch the light
-  const c = onFace(new THREE.Group(), EYE.az * side, EYE.el, 0.004);
-  const m = mesh(sphere, M.cornea, c, [0, 0, 0], [EYE.w * 0.62 * 0.9, EYE.h * 0.62 * 0.9, 0.05]);
-  m.castShadow = false; m.renderOrder = 2;
-}
 
 // mustache: a walrus of fuzzy lumps, drooping past the mouth corners
-const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setScalar(1.15);
+const stacheG = onFace(new THREE.Group(), 0, -0.47, -0.012); stacheG.scale.setScalar(1.15);
 {
   const parts = [];
   for (const side of [-1, 1]) {
-    const lumps = [[0.055, 0.0, 0.02, 0.085, 0.06, 0.05], [0.145, -0.03, 0.0, 0.07, 0.05, 0.045], [0.22, -0.085, -0.03, 0.05, 0.045, 0.035]];
+    const lumps = [[0.055, 0.02, 0.02, 0.085, 0.06, 0.05], [0.145, -0.01, 0.0, 0.07, 0.05, 0.045], [0.22, -0.05, -0.03, 0.05, 0.04, 0.035]];   // shorter droop so the open mouth shows below it
     for (const [x, y, z, sx, sy, sz] of lumps) {
       const g = new THREE.SphereGeometry(1, 24, 16);
       g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x * side, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -side * 0.5)), new THREE.Vector3(sx, sy, sz)));
@@ -473,7 +471,7 @@ const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setSc
 }
 
 // cigarette hanging out the right corner of the mouth
-const cig = onFace(new THREE.Group(), 0.2, -0.7, -0.015);
+const cig = onFace(new THREE.Group(), 0.2, -0.8, -0.015);
 cig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0.8, -0.28, 0.5).normalize());
 const cyl = (r, l) => new THREE.CylinderGeometry(r, r, l, 16).rotateX(Math.PI / 2).translate(0, 0, l / 2);
 mesh(cyl(0.026, 0.1), M.filter, cig);
@@ -483,35 +481,39 @@ const ember = mesh(sphere, M.ember, cig, [0, 0, 0.39], [0.024, 0.024, 0.012]);
 const emberLight = new THREE.PointLight(0xff6020, 0.15, 0.7, 2);
 emberLight.position.z = 0.4; cig.add(emberLight);
 
-// cap: oversized fuzzy felt crown with seams, a band, a button, and a big curved brim
+// cap: a felt crown that hugs the skull (about 0.06 proud of it), a short band at the rim, a button, and a visor
+// capG keeps its pivot (animation moves it); capIn holds the geometry, centred on the crown (head 0, 0.04, -0.02)
 const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = -0.05;
+const capIn = group(capG, [0, -0.16, 0.01]);
 {
-  const crownGeo = new THREE.SphereGeometry(0.80, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.515).scale(1, 0.84, 1.0);
-  const crown = mesh(crownGeo, M.cap, capG);
+  const crownGeo = new THREE.SphereGeometry(1, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.73, 0.66, 0.69);
+  const crown = mesh(crownGeo, M.cap, capIn);
   crown.material = M.cap.clone(); crown.material.side = THREE.DoubleSide;
-  capG.add(makeFur(crownGeo, M.cap, { layers: 18, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
-  const bandGeo = new THREE.TorusGeometry(0.795, 0.035, 12, 72).rotateX(Math.PI / 2).translate(0, -0.03, 0);
-  mesh(bandGeo, M.capPlain, capG);
-  capG.add(makeFur(bandGeo, M.capPlain, { layers: 10, length: 0.03, density: 90, root: 0.6, tip: 1.1 }));
-  const buttonGeo = new THREE.SphereGeometry(0.055, 24, 16).scale(1, 0.6, 1).translate(0, 0.67, 0);
-  mesh(buttonGeo, M.capPlain, capG);
-  capG.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
+  capIn.add(makeFur(crownGeo, M.cap, { layers: 10, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
+  const bandGeo = new THREE.TorusGeometry(0.735, 0.035, 12, 72).rotateX(Math.PI / 2).scale(1, 1, 0.95);
+  mesh(bandGeo, M.capPlain, capIn);
+  capIn.add(makeFur(bandGeo, M.capPlain, { layers: 10, length: 0.03, density: 90, root: 0.6, tip: 1.1 }));
+  const buttonGeo = new THREE.SphereGeometry(0.055, 24, 16).scale(1, 0.6, 1).translate(0, 0.66, 0);
+  mesh(buttonGeo, M.capPlain, capIn);
+  capIn.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
 
-  // brim: extruded half-ellipse, bent down at the sides and front
+  // visor: a crescent that starts at the band front and widens forward, bent down a little at the sides
   const bs = new THREE.Shape();
-  bs.moveTo(-0.78, -0.3); bs.lineTo(0.78, -0.3); bs.lineTo(0.78, 0);
-  bs.absellipse(0, 0, 0.78, 0.62, 0, Math.PI, false);
-  bs.lineTo(-0.78, -0.3);
+  bs.moveTo(0.735, 0);
+  bs.absellipse(0, 0, 0.735, 0.70, 0, Math.PI, false);      // inner edge follows the band's front half
+  bs.lineTo(-0.80, 0);
+  bs.absellipse(0, 0, 0.80, 1.2, Math.PI, 0, true);         // outer edge, out to the visor front
+  bs.closePath();
   const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.045, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 40 });
   brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.045, 0);
   const bp = brimGeo.attributes.position;
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), z = bp.getZ(i);
-    const f = clamp(z / 0.62, 0, 1);
-    bp.setY(i, bp.getY(i) - 0.34 * (x / 0.78) ** 2 * (0.3 + 0.7 * f) - 0.04 * f * f);
+    const f = clamp(z / 1.2, 0, 1);
+    bp.setY(i, bp.getY(i) - 0.10 * (x / 0.8) ** 2 * (0.4 + 0.6 * f) - 0.03 * f * f);   // slight downward curve, sides lower
   }
   brimGeo.computeVertexNormals();
-  const brim = group(capG, [0, -0.035, 0.5]); brim.rotation.x = 0.0;
+  const brim = group(capIn);
   mesh(brimGeo, M.brim, brim);
   brim.add(makeFur(brimGeo, M.brim, { layers: 8, length: 0.022, density: 110, gravity: 0.2, root: 0.6, tip: 1.12 }));
 }
@@ -537,22 +539,22 @@ const hairG = group(head);
 const hairSpring = new Spring(40, 6);
 {
   // hair follows the head: full under the cap rim (so the cap sits on hair, not on air), hugging the skull down to the nape
-  const front = 1.0, nu = 150, nv = 36, capR = 0.79;
+  const front = 1.0, nu = 150, nv = 36;
   const pos = [], uv = [], idx = [];
   const ss = (a, b, x) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
   for (let i = 0; i <= nu; i++) {
     const az = front + (Math.PI * 2 - front * 2) * i / nu;           // around the back, from one cheek to the other (0 = face)
     const side = Math.abs(Math.atan2(Math.sin(az), Math.cos(az)));    // 0 at the face .. pi at the back of the head
     const nearFace = 1 - ss(front, front + 0.8, side);               // sideburns by the cheeks are shorter
-    const lock = 0.5 + 0.5 * Math.sin(az * 31 + Math.cos(az * 9) * 2);
-    const elB = lerp(-0.78, -0.3, nearFace) - 0.06 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
+    const lock = 0.5 + 0.5 * Math.sin(az * 13 + Math.cos(az * 5) * 2);
+    const elB = lerp(-0.78, -0.3, nearFace) - 0.02 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
     const elT = 0.62;                                                // starts up inside the cap
     for (let j = 0; j <= nv; j++) {
       const el = lerp(elT, elB, j / nv);
       const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
       const hr = Math.hypot(x, z);
       const fill = 1 - ss(-0.15, 0.3, el);                            // 0 up by the cap rim, 1 lower down
-      const want = lerp(Math.max(hr + 0.04, Math.min(capR, hr + 0.16)), hr + 0.025 + 0.01 * Math.sin(az * 47), fill);
+      const want = lerp(hr + 0.03, hr + 0.025 + 0.01 * Math.sin(az * 47), fill);   // 0.03 off the skull: the cap covers the top
       const k = want / Math.max(hr, 1e-3);
       pos.push(x * k, y, z * k); uv.push(i / nu, j / nv);
     }
@@ -602,17 +604,6 @@ function puff(pos, strength = 1, dir = null, color = null) {
   p.sp.material.rotation = Math.random() * 6;
 }
 
-// optional VRoid model: drop overlay/avatar/byte.vrm in and it replaces the built-in Gary
-let vrmRig = null;
-if (params.get("vrm") !== "0") {
-  fetch("avatar/byte.vrm", { method: "HEAD" }).then(async r => {
-    if (!r.ok) return;
-    const { loadVRM } = await import("./vrm-driver.js");
-    vrmRig = await loadVRM("avatar/byte.vrm", scene);
-    byte.visible = false;
-  }).catch(e => console.warn("VRM not loaded:", e));
-}
-
 // ------------------------------------------------------------ face drawing
 const face = {   // current (smoothed) face state
   squash: [1, 1], lid: [0, 0], lower: [0, 0], wide: 0, gx: 0, gy: 0, pupil: 1,
@@ -654,8 +645,8 @@ function drawEye(side, i) {
   g.strokeStyle = "#2b1606"; g.lineWidth = r * 0.14; g.stroke();
   const pr = r * 0.46 * face.pupil;
   g.fillStyle = "#0d0704"; g.beginPath(); g.arc(0, 0, pr, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(-r * 0.33, -r * 0.36, r * 0.27, r * 0.22, -0.5, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(r * 0.33, -r * 0.36, r * 0.27, r * 0.22, 0.5, 0, Math.PI * 2); g.fill();   // toward the key light (upper right)
+  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(-r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
   g.fillStyle = "rgba(255,230,200,.25)"; g.beginPath(); g.arc(0, r * 0.45, r * 0.5, 0.3, Math.PI - 0.3); g.fill();
   g.restore();
   // upper lid (sleepy / skeptical) and lower lid (smile squint), drawn inside the eye
@@ -697,7 +688,7 @@ function drawBrow(side, i) {
 }
 function drawMouth() {
   const g = fg, m = face.mouth;
-  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.68);
+  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.80);
   const hw = 0.145 * F2P.s * m.width * (1 - 0.45 * m.round);
   const open = m.open * (0.75 + 0.5 * m.round);
   const corner = -m.smile * hw * 0.32;                      // corners up for a smile
@@ -741,11 +732,20 @@ function drawMouth() {
   }
   g.restore();
 }
-let lastFaceKey = "";
+let lastFaceKey = "", lastFaceDraw = 0;
+function faceKey() {                                              // quantised face state as a string; gaze and pupil to 1/40 so jitter does not redraw
+  const f = face, m = f.mouth;
+  let k = "";
+  for (let i = 0; i < 2; i++) k += Math.round(f.squash[i] * 80) + "," + Math.round(f.lid[i] * 80) + "," + Math.round(f.lower[i] * 80) + "," + Math.round(f.browY[i] * 80) + "," + Math.round(f.browTilt[i] * 80) + "|";
+  return k + Math.round(f.wide * 80) + "," + Math.round(f.gx * 40) + "," + Math.round(f.gy * 40) + "," + Math.round(f.pupil * 40) + "," + Math.round(f.blush * 80) + "|" +
+    Math.round(m.open * 80) + "," + Math.round(m.width * 80) + "," + Math.round(m.round * 80) + "," + Math.round(m.smile * 80) + "," + Math.round(m.shift * 80);
+}
 function drawFace() {
-  const key = JSON.stringify(face, (k, v) => typeof v === "number" ? Math.round(v * 80) : v);
+  const key = faceKey();
   if (key === lastFaceKey) return;
-  lastFaceKey = key;
+  const now = performance.now();
+  if (now - lastFaceDraw < 1000 / 30) return;                     // at most 30 redraws a second; the key stays stale, so the next call retries
+  lastFaceDraw = now; lastFaceKey = key;
   const g = fg;
   g.clearRect(0, 0, FACE.W, FACE.H);
   for (const side of [-1, 1]) {                               // cheeks
@@ -780,7 +780,9 @@ document.addEventListener("click", () => { audioCtx(); $("unlock").style.display
 function showBubble(text) { clearTimeout(hideTimer); bubble.textContent = text; bubble.classList.add("show"); }
 function hideBubble(delay = 1500) { clearTimeout(hideTimer); hideTimer = setTimeout(() => bubble.classList.remove("show"), delay); }
 function setThinking(on) { if (on && !thinking) onThinkStart(); thinking = on; }
+let sayTimer = null, sayGen = 0;                  // a timer for text-only lines, and a counter so a stale line can't act after a newer one started
 function stopAudio() {
+  clearTimeout(sayTimer); sayTimer = null;
   if (source) { try { source.onended = null; source.stop(); } catch (e) {} source = null; }
   if (talking) onTalkEnd();
   talking = false;
@@ -791,17 +793,20 @@ function finished() {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "done" }));
 }
 async function say(msg) {
+  const my = ++sayGen;
   setThinking(false);
   stopAudio();
   showBubble(msg.text);
   onTalkStart();
   talkBL = pickBodyLang(msg.text);
-  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; setTimeout(finished, (msg.seconds || 3) * 1000); return; }
+  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000); return; }
   try {
     const c = audioCtx();
     if (c.state === "suspended") $("unlock").style.display = "block";
     const buf = await (await fetch(msg.audio)).arrayBuffer();
+    if (my !== sayGen) return;                     // a newer line started while this one was fetching
     const audio = await c.decodeAudioData(buf);
+    if (my !== sayGen) return;
     source = c.createBufferSource();
     source.buffer = audio;
     source.connect(analyser);
@@ -810,12 +815,13 @@ async function say(msg) {
     source.start();
   } catch (e) {
     console.error(e);
-    setTimeout(finished, (msg.seconds || 3) * 1000);
+    if (my === sayGen) sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000);
   }
 }
 
 // avatar settings (mode, home spot, size) come from the control page through the app, or from the URL
-const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, hiddenUntil: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
+const PROPS = {};   // filled in by the prop loader below; declared up here because applySettings can run at module start (?size=)
+const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
 const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1 };
 function applySettings(set = {}) {
   if (set.mode && ["stay", "wander", "roam", "walkon"].includes(set.mode)) { settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true; }
@@ -829,25 +835,32 @@ function applySettings(set = {}) {
     if (typeof a.sfx === "boolean") settings.acts.sfx = a.sfx;
     if (typeof a.scene === "string" && SCENES[a.scene] && a.scene !== settings.acts.scene) {
       settings.acts.scene = a.scene;
-      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && job.def.manual && !job.def.event) endJob(); }
+      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && !job.def.event && (!sceneAllows(job.name) || scene_().stick !== job.name)) endJob(); }   // the new scene ends whatever it doesn't allow (leaving gaming ends the desk job)
     }
   }
-  if (set.do && set.do.name && Math.abs(Date.now() - (set.do.at || 0)) < 15000) doActivity(set.do.name, set.do);   // one-shot from the control page or an app event (ignored when replayed later)
+  if (set.do && set.do.name) {                                     // one-shot from the control page or an app event (ignored when replayed later)
+    const fresh = Math.abs(Date.now() - (set.do.at || 0)) < 15000;
+    const result = fresh ? doActivity(set.do.name, set.do) : "ignored: older than 15 s";
+    tell({ type: "did", name: set.do.name, result: result || "started" });   // the app logs it, so a missing reaction can be traced
+  }
 }
 function doActivity(name, info = {}) {
-  if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return; }
+  audioCtx();                                                       // a user-visible event: set up the audio context if it isn't yet
+  if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return "stopped"; }
+  if (job && job.def.event && !(JOBS[name] && JOBS[name].event)) return "skipped: a stream event is playing";   // bits and redeems wait for it to end
   if (name === "redeem") {                                          // a channel point redeem: show it, and act it out if the title suggests something
     const title = String(info.title || "a redeem"), who = String(info.who || "someone");
     showBanner(`${who.toUpperCase()} REDEEMED ${title.toUpperCase()}`.slice(0, 48), "#2ec4b6", 4.5); sfx("chime");
     const hit = REDEEM_MAP.find(([re]) => re.test(title.toLowerCase()));
-    if (hit) { if (JOBS[hit[1]]?.prop && !PROPS[JOBS[hit[1]].prop]) return; setTimeout(() => doActivity(hit[1], info), 400); }
+    if (hit) { if (JOBS[hit[1]]?.prop && !PROPS[JOBS[hit[1]].prop]) return "skipped: the prop isn't loaded"; setTimeout(() => doActivity(hit[1], info), 400); }
     else { head.getWorldPosition(V1); for (let i = 0; i < 5; i++) floater(V1.clone().add(V2.set(rand(-0.8, 0.8), 0.6, 0).multiplyScalar(settings.size)), starTex, V3.set(0, 0.35, 0).multiplyScalar(settings.size)); startGesture(["dance", "airguitar", "sneeze", "yawn"][Math.floor(Math.random() * 4)]); }
     return;
   }
-  if (name === "embarrassed" && (job || act.name)) return;            // only when he is free
-  if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return; pendingInfo = info || {}; }
+  if (name === "embarrassed" && (job || act.name)) return "skipped: busy";   // only when he is free
+  if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return "skipped: turned off on the control page"; pendingInfo = info || {}; }
   if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; startGesture(name); }
   else if (JOBS[name]) { job = null; startJob(name, true); }
+  else return "ignored: unknown reaction";
 }
 {
   const m = params.get("mode"); if (m) applySettings({ mode: m });
@@ -859,6 +872,7 @@ function currentMode() { return (typeof SCENES !== "undefined" && SCENES[setting
 
 // websocket to the app, reconnecting with backoff (1 s growing to 10 s) whenever the app is down or restarts
 let wsDelay = 1000, wsTimer = null;
+function tell(o) { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} }   // a note back to the app, dropped while it is down
 function scheduleReconnect() {
   if (wsTimer) return;
   const d = wsDelay * (0.8 + Math.random() * 0.4);
@@ -871,8 +885,13 @@ function connect() {
   ws = sock;
   ws.onopen = () => { wsDelay = 1000; ws.send(JSON.stringify({ type: "hello", role: "overlay" })); };
   ws.onmessage = ev => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "config") { if (msg.name) botName = msg.name; if (msg.avatar) applySettings(msg.avatar); }
+    audioCtx();                                 // first message: set up the audio context now (audioCtx resumes it if suspended)
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { console.error("bad frame from app", e); return; }
+    if (msg.type === "config") {
+      if (msg.name) botName = msg.name;
+      if (msg.build) { if (overlayBuild && msg.build !== overlayBuild) { location.reload(); return; } overlayBuild = msg.build; }
+    }
     else if (msg.type === "avatar") applySettings(msg.set || msg);
     else if (msg.type === "thinking") setThinking(true);
     else if (msg.type === "say") say(msg);
@@ -916,7 +935,7 @@ if (DEMO && !params.has("preview")) {
 }
 
 // ------------------------------------------------------------ animation state
-const S = {   // shared animation state (also fed to the VRM driver)
+const S = {   // shared animation state
   t: 0, level: 0, talk: 0, think: 0, blink: 0, gaze: { x: 0, y: 0 }, x: 0, yaw: 0,
   walkPhase: 0, moving: 0, hop: 0, nod: 0, tilt: 0, headYaw: 0,
 };
@@ -949,11 +968,11 @@ const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 const clock = new THREE.Clock();
 
 // arm poses: shoulder quaternion + elbow bend. Static poses from Euler angles, reach poses from two-bone IK.
-const ARM = { L1: 0.26, L2: 0.22, reach: 0.26 + 0.22 + 0.04 };
+// the arm's rest geometry as the model built it, read once before the first stretch: joint and mesh offsets, and the bone lengths (L1 shoulder to elbow, L2 elbow to hand)
+function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, up: arm.up.position.y, fore: arm.fore.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
 const eulerPose = (sx, sy, sz, ex) => ({ q: new THREE.Quaternion().setFromEuler(new THREE.Euler(sx, sy, sz)), ex });
 const POSE = {
   rest: s => eulerPose(0.05, 0, 0.18 * s, -0.25),
-  wave: s => eulerPose(-2.1, 0, 0.9 * s, -1.0),
   gestureOut: s => eulerPose(-0.9, 0, 0.85 * s, -1.1),
   gestureUp: s => eulerPose(-1.6, 0, 0.5 * s, -1.6),
   gesturePoint: s => eulerPose(-1.3, -0.3 * s, 0.25 * s, -0.4),
@@ -962,17 +981,17 @@ const POSE = {
 };
 const _m4 = new THREE.Matrix4(), _ax = new THREE.Vector3(), _ay = new THREE.Vector3(), _az = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3();
 function reachPose(arm, target) {            // target in torso space; returns a pose whose hand lands on (or points at) the target
-  const S = arm.sh.position;
+  const SP = arm.sh.position, R = armRest(arm), reachMax = R.L1 + R.L2 + 0.04;
   if (target.y > 0 && target.y < 0.69) {                       // a hand target inside his belly gets pushed out to the shirt
     const ez = target.z / 0.86, d = Math.hypot(target.x, ez), r = bodyR(target.y) + 0.075;
     if (d < r) { if (d < 1e-3) target = new THREE.Vector3(0, target.y, r * 0.86); else target = new THREE.Vector3(target.x / d * r, target.y, ez / d * r * 0.86); }
   }
-  _d.copy(target).sub(S);
+  _d.copy(target).sub(SP);
   const want = _d.length();
-  const k = clamp(want / (ARM.reach - 0.01), 1, 1.7);          // cartoon stretch when the target is out of reach (his head is huge)
-  const dist = clamp(want, 0.08, (ARM.reach - 0.01) * k);
+  const k = clamp(want / (reachMax - 0.01), 1, 1.25);          // cartoon stretch when the target is out of reach, capped at 1.25x so the arm never rubber-bands
+  const dist = clamp(want, 0.08, (reachMax - 0.01) * k);
   _d.normalize();
-  const L1 = ARM.L1 * k, L2 = (ARM.L2 + 0.04) * k;
+  const L1 = R.L1 * k, L2 = (R.L2 + 0.04) * k;
   const cosE = clamp((L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2), -1, 1);
   const cosS = clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1);
   const bend = Math.PI - Math.acos(cosE), offset = Math.acos(cosS);
@@ -996,7 +1015,8 @@ function applyArm(arm, p, dt, rate = 7) {
   arm.sh.quaternion.copy(u.p.q);
   arm.el.rotation.x = u.p.ex;
   const k = u.p.k ?? 1;                                       // stretch the arm along its length
-  arm.el.position.y = -0.26 * k; arm.up.position.y = -0.18 * k; arm.up.scale.y = k; arm.fore.position.y = -0.1 * k; arm.fore.scale.y = k; arm.hand.position.y = -0.22 * k;
+  const R = armRest(arm);                                     // offsets come from the built model, so bone changes made there carry through
+  arm.el.position.y = R.el * k; arm.up.position.y = R.up * k; arm.up.scale.y = k; arm.fore.position.y = R.fore * k; arm.fore.scale.y = k; arm.hand.position.y = R.hand * k;
   keepArmOut(arm, k, p.reach);
 }
 // keep the arm outside his belly: swing the shoulder out until the upper arm, elbow, forearm and hand clear the body
@@ -1005,7 +1025,7 @@ function bodyR(y) {
   for (let i = 1; i < BODY_R.length; i++) if (y <= BODY_R[i][1]) { const [r0, y0] = BODY_R[i - 1], [r1, y1] = BODY_R[i]; return lerp(r0, r1, (y - y0) / (y1 - y0)); }
   return 0;
 }
-const ARM_PTS = [["sh", -0.13, 0.062, 0], ["el", 0, 0.06, 0], ["el", -0.1, 0.058, 1], ["hand", -0.04, 0.068, 1]];   // last: 0 = elbow end, 1 = hand end
+const ARM_PTS = [["sh", -0.15, 0.082, 0], ["el", 0, 0.076, 0], ["el", -0.13, 0.075, 1], ["hand", -0.04, 0.068, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
 const _kp = new THREE.Vector3(), _kh = new THREE.Vector3(), _kq = new THREE.Quaternion();
 function armHit(arm, k, which) {            // deepest point of this end of the arm inside the body: {pen, p, r}
   let best = null;
@@ -1020,12 +1040,12 @@ function armHit(arm, k, which) {            // deepest point of this end of the 
   return best;
 }
 function keepArmOut(arm, k, reach) {
-  const S = arm.sh.position;
+  const SP = arm.sh.position;
   for (let pass = 0; pass < 6; pass++) {
     arm.sh.updateMatrixWorld(true);
     let h = reach ? null : armHit(arm, k, 1);
     if (h) {                                 // hand or forearm inside: swing the whole arm so the hand comes out (mostly forward when it's in front)
-      const v = h.p.sub(S), len = v.length(); if (len < 0.05) return;
+      const v = h.p.sub(SP), len = v.length(); if (len < 0.05) return;
       const axis = v.clone().cross(h.r); if (axis.lengthSq() < 1e-8) axis.set(0, 0, arm.side);
       arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(axis.normalize(), Math.min(0.5, (h.pen + 0.005) / len)));
       continue;
@@ -1033,7 +1053,7 @@ function keepArmOut(arm, k, reach) {
     h = armHit(arm, k, 0); if (reach) { const h2 = armHit(arm, k, 1); if (h2 && (!h || h2.pen > h.pen)) h = h2; }
     if (!h) return;                          // elbow inside: turn the arm around the shoulder-hand line so the hand stays put and the elbow pokes out
     _kh.set(0, -0.04, 0); arm.hand.localToWorld(_kh); torso.worldToLocal(_kh);
-    const ax = _kh.sub(S).normalize(), v = h.p.sub(S), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
+    const ax = _kh.sub(SP).normalize(), v = h.p.sub(SP), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
     const rt = h.r.clone().sub(ax.clone().multiplyScalar(ax.dot(h.r)));
     if (dist < 0.03 || rt.lengthSq() < 0.05) {
       if (reach) return;                     // can't swing it clear without moving the hand off what it holds
@@ -1100,14 +1120,13 @@ const PROP_SLOTS = {
   djdeck: { fx: -0.78, fz: 0.15, yaw: 0.22, half: 0.75 },
   couch:  { fx: 0.80,  fz: 0.10, yaw: -0.22, half: 1.0 },
   bed:    { fx: -0.74, fz: 0.02, yaw: 0.12, half: 1.55 },
-  arcade: { fx: 0.9,   fz: 0.25, yaw: -1.25, half: 0.5 },
+  arcade: { fx: 0.55,  fz: 0.25, yaw: -0.75, half: 0.5 },
   desk:   { fx: 0.8,   fz: 0.35, yaw: -0.25, half: 0.85 },
-  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.25 },
+  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.45 },
   fridge: { fx: -0.9,  fz: 0.3,  yaw: 0.55, half: 0.45 },
   plant:  { fx: 0.55,  fz: 0.55, yaw: -0.2, half: 0.3 },
   easel:  { fx: -0.55, fz: 0.4,  yaw: 0.3,  half: 0.6 },
 };
-const PROPS = {};
 let headphones = null;
 for (const name of Object.keys(PROP_SLOTS)) {
   import(`./props/${name}.js`).then(m => {
@@ -1115,7 +1134,7 @@ for (const name of Object.keys(PROP_SLOTS)) {
     inst.root.visible = false;
     inst.root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
     scene.add(inst.root);
-    PROPS[name] = { inst, slot: PROP_SLOTS[name], spring: new Spring(140, 13), shown: false, linger: 0, st: { active: false } };
+    PROPS[name] = { key: name, inst, slot: PROP_SLOTS[name], spring: new Spring(140, 13), shown: false, linger: 0, st: { active: false } };
     if (m.buildHeadphones) {
       headphones = m.buildHeadphones(THREE, { mesh, group, sphere, canvasTex }).root;
       headphones.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
@@ -1132,8 +1151,34 @@ function placeProp(p) {
   p.inst.root.rotation.y = s.yaw;
   p.inst.root.scale.setScalar(size);
   p.inst.root.updateMatrixWorld(true);
+  p.foot = new THREE.Box3().setFromObject(p.inst.root).expandByScalar(0.3);   // footprint for the walk (cached until the prop is placed again)
+}
+// walks avoid shown props: random targets and walk midpoints are re-drawn when they land inside a footprint
+function propBlocked(x, z) {
+  for (const p of Object.values(PROPS)) { const f = p.foot; if (p.shown && f && x > f.min.x && x < f.max.x && z > f.min.z && z < f.max.z) return true; }
+  return false;
+}
+const walkBlocked = (x, z) => propBlocked(x, z) || propBlocked((x + nav.x) / 2, (z + nav.z) / 2);
+function freeTarget(gen) {                     // up to 8 draws from gen; keeps the old target when none is clear
+  for (let i = 0; i < 8; i++) { const [x, z] = gen(); if (!walkBlocked(x, z)) return [x, z]; }
+  return [nav.tx, nav.tz];
+}
+function freeX(x, z, xm) {                     // a job's stage spot at depth z: the same x if clear, else up to 8 other x in the stage; keeps x when none is clear
+  if (!walkBlocked(x, z)) return x;
+  for (let i = 0; i < 8; i++) { const cx = rand(-xm, xm); if (!walkBlocked(cx, z)) return cx; }
+  return x;
 }
 const propPt = (p, x, y, z) => p.inst.root.localToWorld(new THREE.Vector3(x, y, z));
+const _anchorWarned = new Set();
+function anchorsOf(p) {                                       // a renamed or missing prop anchor gets a stand-in at the prop's middle (warned once) instead of throwing
+  const A = p?.inst?.anchors || {};
+  return new Proxy(A, { get(t, k) {
+    if (typeof k !== "string" || k in t) return t[k];
+    const tag = (p?.key || "prop") + "." + k;
+    if (!_anchorWarned.has(tag)) { _anchorWarned.add(tag); console.warn("missing prop anchor", tag); }
+    return new THREE.Vector3(0, 0.6, 0);
+  } });
+}
 function poof(pos, n = 14, r = 0.9, color = null) {
   for (let i = 0; i < n; i++) {
     const a = i / n * Math.PI * 2;
@@ -1201,20 +1246,21 @@ function startJob(name, force = false) {
     const p = job.p;
     if (!p.shown) placeProp(p);
     const u = p.inst.spots.use;
+    job.spot = u;
     if (name === "dj") {                                       // round the side of the table to get behind it
       const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || 1);
       job.path = [propPt(p, side * 1.05, 0, 0.6), propPt(p, side * 1.05, 0, u.z), propPt(p, u.x, 0, u.z)];
-    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];
+    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];   // job.spot (set above) gives him the cabinet's facing: spotYaw
     else if (name === "couch") job.path = [propPt(p, u.x, 0, u.z + 0.75)];
-    else if (name === "nap") job.path = [propPt(p, -0.35, 0, 1.0)];
+    else if (name === "nap") job.path = [propPt(p, u.x, 0, u.z + 0.9)];   // walk to the foot end first, so the lie-down starts where he stands
     else if (name === "desk" || name === "desknap") { const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || -1); job.path = [propPt(p, side * 1.1, 0, 0.6), propPt(p, side * 1.1, 0, u.z - 0.1), propPt(p, u.x, 0, u.z - 0.1)]; }   // round the side of the desk to the chair
   } else if (name === "stare") {
     const z = stage.zNear;
-    job.path = [new THREE.Vector3(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), z, xMaxAt(z, size) * 0.6), 0, z)];
   } else if (name === "butterfly") { job.path = []; job.phase = "do"; job.t0 = S.t; job.until = S.t + 15; job.at = { x: nav.x, z: nav.z }; bfStart(); return true;
   } else if (name === "lieback") {                               // lie along the bottom edge of the screen; further back he'd look like he floats in mid-air (the overlay has no visible floor)
     const z = lerp(stage.zNear, stage.zFar, 0.12), xm = Math.max(0, xMaxAt(z, size) - 1.8 * size);
-    job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)];
   } else job.path = [new THREE.Vector3(nav.x, 0, nav.z)];
   if (name === "lieback") job.dir = job.path[0].x > 0 ? -1 : 1;            // head toward the middle of the screen
   return true;
@@ -1306,7 +1352,7 @@ function bfGround(size) {                                       // where he runs
 function bfUpdate(t, dt) {
   if (!bf.g.visible) return;
   const size = settings.size, k = t - bf.t0, sd = bf.seed;
-  const cap = tmp.set(0, 0.95, -0.05); capG.localToWorld(cap);
+  const cap = tmp.set(0, 0.63, -0.05); capG.localToWorld(cap);              // just above the crown button (the cap geometry sits 0.16 below capG)
   let p;
   if (bf.leave && t - bf.leave > 0) {                                    // flies away up and off
     const q = t - bf.leave; p = bf.pos.clone().add(new THREE.Vector3(Math.sin(q * 3) * 0.02 + 0.03, 0.04, 0).multiplyScalar(size * 40 * dt));
@@ -1475,7 +1521,7 @@ function poseJob(t, dt) {
     J.torsoX = -0.28;
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(8, 16); }
     if (job.sub === 0) { J.armN = reachPose(armN, headPoint(-1.75, -0.1, 0.06)); J.armP = reachPose(armP, headPoint(1.75, -0.1, 0.06)); }      // hands behind head
-    else if (job.sub === 1) { J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, toTorso(propPt(p, p.inst.anchors.armrest.x, p.inst.anchors.armrest.y + 0.06, p.inst.anchors.armrest.z))); }
+    else if (job.sub === 1) { J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, toTorso(propPt(p, anchorsOf(p).armrest.x, anchorsOf(p).armrest.y + 0.06, anchorsOf(p).armrest.z))); }
     else { const munch = Math.max(0, Math.sin(t * 1.3)); J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, munch > 0.5 ? headPoint(0.15, -0.72, 0.12) : tp(0.42, 0.1, 0.2)); }
     J.wN = J.wP = k;
     J.neck = [-0.05, 0.2 * Math.sin(t * 0.25), 0.1]; J.neckW = k;
@@ -1498,7 +1544,7 @@ function poseJob(t, dt) {
     if (asleep && k > 0.8 && t > nextFloat) { head.getWorldPosition(tmp); tmp.y += 0.55 * size; floater(tmp, zTex, tmp2.set(0.12, 0.3, 0.05).multiplyScalar(size)); nextFloat = t + 1.4; }
     p.st = { active: k > 0.5, breath };
   } else if (name === "dj") {
-    const p = job.p, A = p.inst.anchors;
+    const p = job.p, A = anchorsOf(p);
     const beat = (t * 2.05) % 1;
     J.yaw = p.slot.yaw;
     if (t > job.nextSub) { job.sub = Math.random() < 0.25 ? 2 : Math.floor(Math.random() * 2); job.nextSub = t + rand(4, 9); }
@@ -1530,7 +1576,7 @@ function poseJob(t, dt) {
     J.face = fs => { fs.mouth.smile += 0.6; fs.mouth.open = Math.max(fs.mouth.open, onCap ? 0.35 : 0.2); fs.browY = fs.browY.map(v => v + 0.6); if (onCap) { fs.gx = 0; fs.gy = 1; fs.wide += 0.3; } };
     if (onCap) J.look = { x: 0, y: 1 };
   } else if (name === "desk" || name === "desknap") {
-    const p = job.p, u = p.inst.spots.use, A = p.inst.anchors, asleep = name === "desknap" && job.phase === "do" && t - job.t0 > 4;
+    const p = job.p, u = p.inst.spots.use, A = anchorsOf(p), asleep = name === "desknap" && job.phase === "do" && t - job.t0 > 4;
     const seat = propPt(p, u.x, u.y - 0.46, u.z - 0.1)   // a little back so his belly clears the desk;
     J.root = seat; J.rootQ = jv.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.slot.yaw).clone(); J.rootW = k;
     J.legs = SIT_LEGS.map((l, i) => ({ ...l, z: i ? 0.1 : -0.1 })); J.legW = k;
@@ -1567,8 +1613,8 @@ function poseJob(t, dt) {
     }
     p.st = { active: k > 0.5 && !asleep, typing, asleep };
   } else if (name === "arcade") {
-    const p = job.p, A = p.inst.anchors;
-    J.yaw = p.slot.yaw + Math.PI;
+    const p = job.p, A = anchorsOf(p);
+    J.yaw = p.slot.yaw + ((job.spot && job.spot.yaw) || 0);     // the cabinet spot's facing (profile, so the screen shows)
     if (t > job.nextSub) { job.sub = Math.random() < 0.2 ? 1 + Math.floor(Math.random() * 2) : 0; job.nextSub = t + (job.sub ? 1.6 : rand(4, 9)); }
     const stick = { x: Math.sin(t * 5.3) * Math.sin(t * 1.3), y: Math.sin(t * 3.7) * 0.6 };
     const press = [Math.sin(t * 17) > 0.3, Math.sin(t * 11 + 1) > 0.6, Math.sin(t * 7 + 2) > 0.7];
@@ -1684,13 +1730,14 @@ function tone(type, f0, f1, dur, vol = 0.3, delay = 0, vib = 0) {
   g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g); g.connect(sfxBus); o.start(t0); o.stop(t0 + dur + 0.05);
 }
+let noiseBuf = null;                                // one 2 s white-noise buffer, reused by every noise() (each play is cut to its own length)
 function noise(dur, vol = 0.3, delay = 0, freq = 1000, ftype = "bandpass") {
-  const c = sfxOut(), t0 = c.currentTime + delay, n = Math.ceil(c.sampleRate * dur), b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const c = sfxOut(), t0 = c.currentTime + delay;
+  if (!noiseBuf) { noiseBuf = c.createBuffer(1, Math.ceil(c.sampleRate * 2), c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
   const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
-  s.buffer = b; f.type = ftype; f.frequency.value = freq;
+  s.buffer = noiseBuf; f.type = ftype; f.frequency.value = freq;
   g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0);
+  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0, 0, dur);
 }
 const SFX = {
   pop: () => tone("sine", 500, 1100, 0.12, 0.3),
@@ -1750,7 +1797,8 @@ function eventStart(name, info, size) {
   }
   job.at = { x: nav.x, z: nav.z };
   const B = {
-    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"], sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : `NEW SUB: ${who}!`, "#8a5cff"],
+    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"],
+    sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : n > 1 ? `${n} GIFT SUBS FROM ${who}!` : `NEW SUB: ${who}!`, "#8a5cff"],
     bits: [`${n ? n + " " : ""}BITS FROM ${who}!`, "#ffb300"], follow: [`THANKS FOR THE FOLLOW, ${who}!`, "#2ec4b6"], hype: ["CHAT IS HYPED!", "#ff6b00"], rip: ["RIP DUM  o7", "#6b7280"],
   }[name];
   showBanner(B[0], B[1], (job.until - S.t) - 0.4);
@@ -1910,9 +1958,9 @@ function startJob3(name, size) {
     job.spot = s;
     job.path = [propPt(p, s.x, 0, s.z + 0.4), propPt(p, s.x, 0, s.z)];
   } else if (job.def.event) eventStart(name, pendingInfo, size);
-  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)]; }
+  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)]; }
   else if (name === "goodbye") job.path = [new THREE.Vector3(0, 0, lerp(stage.zFar, stage.zNear, 0.7))];
-  else if (name === "sign") job.path = [new THREE.Vector3(clamp(nav.x, -1.5 * size, 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
+  else if (name === "sign") job.path = [new THREE.Vector3(freeX(clamp(nav.x, -1.5 * size, 1.5 * size), lerp(stage.zFar, stage.zNear, 0.6), 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
   else if (name === "chatfloor") job.path = [new THREE.Vector3(clamp(nav.x, -1.5, 1.5), 0, stage.zNear)];
   if (name === "read") { job.kind = Math.random() < 0.5 ? "paper" : "book"; job.seated = job.kind === "book" && Math.random() < 0.6; }
   if (name === "snack") job.food = Math.random() < 0.5 ? "pizza" : "chips";
@@ -1922,8 +1970,8 @@ function startJob3(name, size) {
 }
 
 // ---- jobs: what he does there
-const FLOOR_LEGS = [{ hp: -1.35, kn: 2.5, ft: 0.4, z: -0.75 }, { hp: -1.35, kn: 2.5, ft: 0.4, z: 0.75 }];
-function sitFloor(k, size, drop = 0.34) {
+const FLOOR_LEGS = [{ hp: -1.57, kn: 0.15, ft: 0.25, z: -0.35 }, { hp: -1.57, kn: 0.15, ft: 0.25, z: 0.35 }];   // legs out in front, heels on the floor (was a kneel: the shins folded back)
+function sitFloor(k, size, drop = 0.30) {
   J.root = new THREE.Vector3(job.at.x, -drop * size, job.at.z); J.rootQ = new THREE.Quaternion(); J.rootW = k;
   J.legs = FLOOR_LEGS; J.legW = k;
 }
@@ -1973,13 +2021,13 @@ function ballUpdate(t, dt, size) {
   b.rot.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(dt * 9, dt * 4, 0)));
 }
 function poseJob3(name, t, dt, k) {
-  const size = settings.size, k2 = t - (job.d0 ?? job.t0), p = job.p, A = p ? p.inst.anchors : null;
+  const size = settings.size, k2 = t - (job.d0 ?? job.t0), p = job.p, A = p ? anchorsOf(p) : null;
   const spotYaw = p ? p.slot.yaw + ((job.spot && job.spot.yaw) || 0) : 0;
   if (name === "floorsit") {
     sitFloor(k, size);
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(6, 12); }
-    if (job.sub === 0) { J.torsoX = -0.3; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands
-    else if (job.sub === 1) { J.torsoX = 0.15; J.armN = reachPose(armN, tp(-0.24, 0.02, 0.36)); J.armP = reachPose(armP, tp(0.24, 0.02, 0.36)); }   // hands on his knees
+    if (job.sub === 0) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands (the reach clamp keeps the arms short)
+    else if (job.sub === 1) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.16, 0.0, 0.27)); J.armP = reachPose(armP, tp(0.16, 0.0, 0.27)); }   // hands resting on his knees
     else { J.torsoX = 0.1; J.armN = reachPose(armN, tp(-0.12, 0.08, 0.36)); J.armP = reachPose(armP, headPoint(0.25, -0.8, 0.15)); }               // chin in his hand
     J.wN = J.wP = k; J.neck = [0, 0.35 * Math.sin(t * 0.3), 0.08 * Math.sin(t * 0.5)]; J.neckW = k;
     J.face = fs => { fs.mouth.smile += 0.2; };
@@ -2096,7 +2144,7 @@ function poseJob3(name, t, dt, k) {
     if (job.phase === "do") sweat(t, size, effort);
     p.st = { active: k > 0.5, takeL: e === 3 && on > 0.05, takeR: e === 3 && on > 0.05 };
   } else if (name === "punch") {
-    J.yaw = spotYaw;
+    J.yaw = spotYaw - 0.35;                                   // a turn toward the camera, so the bag sits beside his head rather than behind it
     const hitW = propPt(p, A.bagHit.x, A.bagHit.y, A.bagHit.z), bonked = job.bonkT && t - job.bonkT < 1.8;
     job.punches ??= 0;
     if (bonked) {
@@ -2299,7 +2347,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     J.capPop = 2.2 * catching;                                    // holds his cap up to catch the coins
     capG.getWorldPosition(V1);
     J.armN = reachPose(armN, toTorso(V1.clone().add(V2.set(-0.3, 0, 0).multiplyScalar(size * J.scale)))); J.armP = reachPose(armP, toTorso(V1.clone().add(V2.set(0.3, 0, 0).multiplyScalar(size * J.scale)))); J.wN = J.wP = k * catching;
-    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * 2.2 * size, z: job.at.z, speed: 2.2 * size };
+    const sway = Math.max(0, Math.min(2.2 * size, xMaxAt(job.at.z, size) - 0.5 * size));   // keep the sway inside the frame (matters on a square source)
+    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * sway, z: job.at.z, speed: 2.2 * size };
     J.yaw = 0; J.look = { x: 0, y: 0.9 };
     J.face = fs => { fs.wide += 0.4; fs.mouth.open = Math.max(fs.mouth.open, 0.6); fs.mouth.smile += 1; fs.pupil += 0.3; fs.browY = fs.browY.map(v => v + 1); };
     if (once("rain1", k2 > 0.4)) { FX.coins?.rain(0, W, clamp(Math.round(n / 4), 60, 400)); sfx("airhorn"); }
@@ -2334,7 +2383,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     if (live && t > nextFloat && k2 > 1) { floater(screenPt(rand(-0.9, 0.9), -0.8, stage.zNear), fTex, V2.set(0, 0.6, 0).multiplyScalar(size)); nextFloat = t + 0.25; }
   }
   if (!J.root) { J.root = new THREE.Vector3(nav.x, S.hop * size, nav.z); J.rootQ = yawQ(J.yaw ?? 0); J.rootW = 1; }
-  if (stage.wide) J.root.y -= (J.scale - 1) * 1.75 * size;           // giant: he stands in front of the bottom edge so his whole face fits on screen
+  // giant: he stands in front of the bottom edge so his whole face fits on screen (the square frame is lower, so he drops further)
+  J.root.y -= (J.scale - 1) * (stage.wide ? 1.75 : 2.4) * size;
 }
 
 function blendFace(fs, fn, w) {                                // apply an activity's face changes to a copy, then mix by weight
@@ -2430,7 +2480,7 @@ function update(dt) {
     speed = 0.5 * size;
     if (want) { nav.tx = clamp(nav.x, homeX - 0.5, homeX + 0.5); nav.tz = clamp(nav.z, homeZ - 0.4, homeZ + 0.4); }
     else if (t > nav.nextDecision) {
-      nav.tx = clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm); nav.tz = clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear);
+      [nav.tx, nav.tz] = freeTarget(() => [clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm), clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear)]);
       nav.nextDecision = t + rand(4, 10);
     }
   } else if (mode === "roam") {
@@ -2447,12 +2497,8 @@ function update(dt) {
         nav.x = side * (xMaxAt(nav.z, size) + 2.2 * size);
         nav.tx = side * rand(0.2, 0.8) * Math.max(0, xMaxAt(nav.z, size) - margin); nav.tz = nav.z;
         nav.nextDecision = t + rand(4, 9);
-      } else if (false) {                                            // (wandering off screen is off: g doesn't want him leaving the screen)
-        nav.tx = Math.sign(nav.x || 1) * (xMaxAt(nav.z, size) + 2.2 * size); nav.tz = nav.z;
-        nav.nextDecision = t + rand(8, 16);
       } else {
-        nav.tz = rand(stage.zFar, stage.zNear);
-        nav.tx = rand(-1, 1) * Math.max(0, xMaxAt(nav.tz, size) - margin);
+        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear); return [rand(-1, 1) * Math.max(0, xMaxAt(z, size) - margin), z]; });
         nav.nextDecision = t + rand(3, 9);
       }
     }
@@ -2610,7 +2656,6 @@ function update(dt) {
   }
 
   updateFur(t);
-  if (vrmRig) { vrmRig.update(dt, S); return; }
 
   // ---- drive the built-in model
   byte.position.set(nav.x, S.hop * size, nav.z);
@@ -2663,8 +2708,8 @@ function update(dt) {
     else pN = blendPose(pN, reachPose(armN, headPoint(-0.15, -0.85, thinkStyle === "pencil" ? 0.3 + 0.06 * Math.max(0, Math.sin(t * 14)) : 0.08)), S.think);   // hand on chin, or tapping a pencil on it
   }
   if (act.name === "drag") pP = blendPose(pP, reachPose(armP, headPoint(0.3, -0.72, 0.2)), Math.sin(Math.min(1, ap / 0.75) * Math.PI) ** 0.5);  // hand to the cigarette
-  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.2, 0.25 + Math.sin(t * 16) * 0.05, 0.12)), w); }
-  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.45, 0.35, 0.35)), Math.sin(ap * Math.PI) ** 0.5);
+  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.0, 0.2 + Math.sin(t * 16) * 0.04, 0.12)), w); }   // the temple, not the crown
+  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.06, 0.20)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the band at the side of his head (the brim dips to head y -0.06 there)
   if (act.name === "wave") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, eulerPose(-2.1, 0, 0.9 + Math.sin(t * 14) * 0.25, -1.0), w); }
   if (act.name === "stretch") { const w = Math.sin(ap * Math.PI) ** 0.5; pN = blendPose(pN, POSE.up(-1), w); pP = blendPose(pP, POSE.up(1), w); }
   if (S.hop > 0) { const hopQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.6, 0, 0)); pN.q.premultiply(hopQ); pP.q.premultiply(hopQ); }
@@ -2724,11 +2769,13 @@ function update(dt) {
     bubble.style.left = px + "px"; bubble.style.top = py + "px";
   }
 }
+let lastFrameErr = null;
 function tick() {
+  requestAnimationFrame(tick);                        // queue the next frame first, so one bad prop frame can't freeze the overlay
   const dtf = Math.min(clock.getDelta(), 0.05);
-  if (!debug.frozen) update(dtf);                     // byteDebug.frozen = true holds the pose for preview screenshots
+  try { if (!debug.frozen) update(dtf); }            // byteDebug.frozen = true holds the pose for preview screenshots
+  catch (e) { if (String(e && e.message) !== lastFrameErr) { lastFrameErr = String(e && e.message); console.error(e); } }   // log each distinct error once
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
 }
 addEventListener("resize", resize);
 resize();
