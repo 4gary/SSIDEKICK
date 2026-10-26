@@ -240,6 +240,29 @@ class Sidekick:
     async def push_status(self):
         await self.send_controls(self.status())
 
+    async def watch_lm(self):
+        """LM Studio is often started after Gary. Until it answers, look again every 30 s and update the panel."""
+        while True:
+            await asyncio.sleep(30)
+            if self.lm_status.startswith("Can't reach"):
+                status = await self.brain.check()
+                if status != self.lm_status:
+                    self.lm_status = status
+                    log.info(status)
+                    await self.push_status()
+
+    async def supervise(self, name, factory):
+        """Runs one background job forever. If it crashes, the error is logged and it starts again after 5 s."""
+        while True:
+            try:
+                await factory()
+                log.warning("%s stopped; restarting in 5s", name)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("%s crashed; restarting in 5s", name)
+            await asyncio.sleep(5)
+
     async def ws_handler(self, request):
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
@@ -360,25 +383,26 @@ class Sidekick:
         log.info("OBS Browser Source:  http://localhost:%d   (width 400, height 400)", port)
         log.info("Control panel:       http://localhost:%d/control", port)
 
-        tasks = [asyncio.create_task(self.director()),
-                 asyncio.create_task(self.memory.maintain(
-                    self.brain, lambda: not self.busy and not self.jobs and not self.alerts)),
-                 asyncio.create_task(self.features.run())]
+        tasks = [self.supervise("Director", self.director),
+                 self.supervise("Memory", lambda: self.memory.maintain(
+                     self.brain, lambda: not self.busy and not self.jobs and not self.alerts)),
+                 self.supervise("Features", self.features.run),
+                 self.supervise("LM Studio check", self.watch_lm)]
         src = self.cfg["chat"].get("source", "streamerbot")
         use_sb_actions = bool(self.cfg["streamerbot"].get("url"))
         if src == "streamerbot" or use_sb_actions:
             self.sb = StreamerBot(self.cfg, session)
             self.sb.on_event = self.features.on_sb_event   # raids, subs, cheers, follows, OBS scenes
-            tasks.append(asyncio.create_task(
-                self.sb.run(on_chat=self.on_chat if src == "streamerbot" else None, on_status=self.push_status)))
+            tasks.append(self.supervise("Streamer.bot", lambda: self.sb.run(
+                on_chat=self.on_chat if src == "streamerbot" else None, on_status=self.push_status)))
         if src == "twitch":
-            tasks.append(asyncio.create_task(twitch_chat(self.cfg["chat"]["twitch_channel"], self.on_chat)))
+            tasks.append(self.supervise("Twitch chat", lambda: twitch_chat(self.cfg["chat"]["twitch_channel"], self.on_chat)))
         if self.cfg["listen"].get("enabled"):
             from listen import Listener
             Listener(self.cfg, lambda t: self.on_streamer(t, spoken=True),
                      lambda: self.busy and not self.features.cfg["quiet"].get("listen_while_talking", True)).start(
                 asyncio.get_running_loop())
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)   # the jobs are supervised, so this only ends on shutdown
 
 
 LOG_BUFFER = collections.deque(maxlen=200)
