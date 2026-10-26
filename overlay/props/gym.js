@@ -126,7 +126,8 @@ export function build(THREE, ctx) {
   // ---------- dumbbell rack: base, two uprights, two shelves ----------
   const rack = group(root, [RX, 0, 0]);
   mesh(rbox(0.6, 0.04, 0.5, 0.015), frameMat, rack, [0, 0.02, 0]);
-  for (const s of [-1, 1]) mesh(rbox(0.035, 0.82, 0.46, 0.012), frameMat, rack, [s * 0.2825, 0.45, 0]);
+  // uprights inset 2 mm so their outer faces are not coplanar with the base and shelves (x +-0.3)
+  for (const s of [-1, 1]) mesh(rbox(0.035, 0.82, 0.46, 0.012), frameMat, rack, [s * 0.2805, 0.45, 0]);
   mesh(rbox(0.6, 0.03, 0.46, 0.01), shelfMat, rack, [0, SH_LO - 0.015, 0]);
   mesh(rbox(0.6, 0.03, 0.46, 0.01), shelfMat, rack, [0, SH_HI - 0.015, 0]);
 

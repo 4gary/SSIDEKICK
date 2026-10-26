@@ -59,8 +59,8 @@ export function build(THREE, ctx) {
   // Base / plinth: y 0.12 .. 0.30, z -0.48 .. 0.35
   mesh(rbox(1.9, 0.18, 0.83, 0.07), frameMat, root, [0, 0.21, -0.065]);
 
-  // Chunky rounded arm rests at x = +-0.85, top at y 0.66
-  for (const x of [-0.85, 0.85]) mesh(rbox(0.2, 0.54, 0.83, 0.08), armMat, root, [x, 0.39, -0.065]);
+  // Chunky rounded arm rests at x = +-0.853, top at y 0.66 (3 mm outside the plinth and back, whose outer faces are at 0.95)
+  for (const x of [-0.853, 0.853]) mesh(rbox(0.2, 0.54, 0.83, 0.08), armMat, root, [x, 0.39, -0.065]);
 
   // Backrest: tilted back ~0.15 rad. Pivot at the bottom of the back, z -0.30, y 0.30.
   const back = group(root, [0, 0.30, -0.30]);
@@ -84,7 +84,7 @@ export function build(THREE, ctx) {
     root, [0.85, 0.68, 0.12], [1, 1, 1], [0, 0.3, 0.03]);
 
   const anchors = {
-    armrest: new THREE.Vector3(-0.85, 0.66, 0.0),  // arm rest on Gary's right (-x side when he faces +z)
+    armrest: new THREE.Vector3(-0.853, 0.66, 0.0),  // arm rest on Gary's right (-x side when he faces +z)
     seatR: new THREE.Vector3(0.45, 0.44, 0.05),    // top centre of the empty right cushion
   };
 
