@@ -2328,7 +2328,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     J.capPop = 2.2 * catching;                                    // holds his cap up to catch the coins
     capG.getWorldPosition(V1);
     J.armN = reachPose(armN, toTorso(V1.clone().add(V2.set(-0.3, 0, 0).multiplyScalar(size * J.scale)))); J.armP = reachPose(armP, toTorso(V1.clone().add(V2.set(0.3, 0, 0).multiplyScalar(size * J.scale)))); J.wN = J.wP = k * catching;
-    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * 2.2 * size, z: job.at.z, speed: 2.2 * size };
+    const sway = Math.max(0, Math.min(2.2 * size, xMaxAt(job.at.z, size) - 0.5 * size));   // keep the sway inside the frame (matters on a square source)
+    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * sway, z: job.at.z, speed: 2.2 * size };
     J.yaw = 0; J.look = { x: 0, y: 0.9 };
     J.face = fs => { fs.wide += 0.4; fs.mouth.open = Math.max(fs.mouth.open, 0.6); fs.mouth.smile += 1; fs.pupil += 0.3; fs.browY = fs.browY.map(v => v + 1); };
     if (once("rain1", k2 > 0.4)) { FX.coins?.rain(0, W, clamp(Math.round(n / 4), 60, 400)); sfx("airhorn"); }
@@ -2363,7 +2364,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     if (live && t > nextFloat && k2 > 1) { floater(screenPt(rand(-0.9, 0.9), -0.8, stage.zNear), fTex, V2.set(0, 0.6, 0).multiplyScalar(size)); nextFloat = t + 0.25; }
   }
   if (!J.root) { J.root = new THREE.Vector3(nav.x, S.hop * size, nav.z); J.rootQ = yawQ(J.yaw ?? 0); J.rootW = 1; }
-  if (stage.wide) J.root.y -= (J.scale - 1) * 1.75 * size;           // giant: he stands in front of the bottom edge so his whole face fits on screen
+  // giant: he stands in front of the bottom edge so his whole face fits on screen (the square frame is lower, so he drops further)
+  J.root.y -= (J.scale - 1) * (stage.wide ? 1.75 : 2.4) * size;
 }
 
 function blendFace(fs, fn, w) {                                // apply an activity's face changes to a copy, then mix by weight
