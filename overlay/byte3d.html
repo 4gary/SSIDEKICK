@@ -19,8 +19,7 @@
 <script type="importmap">
 { "imports": {
   "three": "./lib/three/build/three.module.min.js",
-  "three/addons/": "./lib/three/examples/jsm/",
-  "@pixiv/three-vrm": "./lib/three-vrm/three-vrm.module.min.js"
+  "three/addons/": "./lib/three/examples/jsm/"
 } }
 </script>
 </head>
@@ -33,7 +32,7 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?vrm=0  ?bg=#4a7fb5  ?yaw=0.6
+// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
 const params = new URLSearchParams(location.search);
 const CAP_TEXT = params.get("cap") ?? "COCK";
 const DEMO = params.has("demo");
@@ -603,17 +602,6 @@ function puff(pos, strength = 1, dir = null, color = null) {
   p.v.multiplyScalar(strength);
   p.life = 0; p.max = 1.8 + Math.random() * 1.4; p.grow = 0.7 + Math.random() * 0.6; p.sp.visible = true;
   p.sp.material.rotation = Math.random() * 6;
-}
-
-// optional VRoid model: drop overlay/avatar/byte.vrm in and it replaces the built-in Gary
-let vrmRig = null;
-if (params.get("vrm") !== "0") {
-  fetch("avatar/byte.vrm", { method: "HEAD" }).then(async r => {
-    if (!r.ok) return;
-    const { loadVRM } = await import("./vrm-driver.js");
-    vrmRig = await loadVRM("avatar/byte.vrm", scene);
-    byte.visible = false;
-  }).catch(e => console.warn("VRM not loaded:", e));
 }
 
 // ------------------------------------------------------------ face drawing
