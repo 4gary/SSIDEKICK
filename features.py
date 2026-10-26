@@ -162,6 +162,8 @@ class Features:
         self.recent = {}            # de-duplicates stream events
         self.gift_bombs = {}
         self.vision_ok = True
+        self.vision_off_at = 0.0    # when vision was switched off (it is tried again after 10 minutes)
+        self.glancing = False       # one screen glance in flight at a time
         self.games_ws = set()
         self.obs = None
         self.scene = ""
@@ -183,7 +185,11 @@ class Features:
 
     def task(self, prompt, unprompted=False, alert=False):
         if alert:
-            self.sk.jobs.appendleft(("alert", None, prompt))   # ahead of chat, so it lands with the 3D reaction
+            q = getattr(self.sk, "alerts", None)     # sidekick.py's own FIFO, played before chat
+            if q is not None:
+                q.append(("alert", None, prompt))
+            else:
+                self.sk.jobs.appendleft(("alert", None, prompt))   # ahead of chat, so it lands with the 3D reaction
         else:
             self.sk.jobs.append(("task", None, prompt))
         if unprompted:
@@ -670,7 +676,7 @@ class Features:
                 "poll": bool(self.poll), "trivia": bool(self.trivia), "predict": bool(self.predict),
                 "race": bool(self.race), "role": self.role[0] if self.role else None,
                 "obs": bool(self.obs and self.obs.connected), "scene": self.scene,
-                "vision": self.cfg["vision"].get("enabled") and self.vision_ok,
+                "vision": self.cfg["vision"].get("enabled") and self.vision_ready(),
                 "voice_effects": self.effect_actions()}
 
     def routes(self, app):
@@ -926,6 +932,8 @@ class Features:
     async def effect_tick(self, now):
         fx = self.cfg["voice_effects"]
         if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.sk.jobs:
+            return
+        if self.muted() or self.away:     # he can't announce a prank while muted or away
             return
         if now - self.last_effect < fx.get("own_min_minutes", 20) * 60 or now - self.last_streamer > 60:
             return     # only when dum is actually talking, so there's someone to hear it on
@@ -1183,6 +1191,8 @@ class Features:
     # ------------------------------------------------------------ marble races
 
     async def race_start(self):
+        if self.race:
+            return      # one race at a time
         rc = self.cfg["race"]
         self.race = {"started": time.monotonic(), "glanced": False}
         st = self.state["race"]
@@ -1208,19 +1218,18 @@ class Features:
         r = self.race
         if not r:
             return
-        if not r["glanced"] and now - r["started"] >= self.cfg["race"].get("glance_after_seconds", 25):
+        if not r["glanced"] and not self.glancing and now - r["started"] >= self.cfg["race"].get("glance_after_seconds", 25):
             r["glanced"] = True
-            desc = await self.look("This is a marble race game on a livestream. In one short sentence, say what's "
-                                   "happening in the race right now: who's leading or doing well if names are "
-                                   "visible, pileups, crashes, close calls.")
-            if desc and self.race is r:
-                self.task(f"Live marble race call! On screen right now: {desc}. Commentate it in one quick, excited "
-                          "sentence like a race announcer.")
+            self.glance_in_background(lambda: self.race_glance(r))
         if now - r["started"] > 900:      # nobody ever said who won
             self.race = None
+            if self.predict and self.predict.get("race"):
+                self.predict = None
             await self.broadcast()
 
     async def race_end(self, winner=None, last=None):
+        if not self.race:
+            return      # no race running, so nothing to end
         self.race = None
         st = self.state["race"]
         lines = []
@@ -1309,12 +1318,13 @@ class Features:
     async def stream_event(self, kind, user, viewers=0, months=0, count=0, bits=0, game="", tier="", prime=False,
                            anonymous=False, recipient=""):
         now = time.monotonic()
-        key = (kind, user.lower(), recipient.lower())
-        if now - self.recent.get(key, -999) < 90:
+        amount = bits or count or months or viewers     # two cheers of different sizes are both real
+        key = (kind, user.lower(), recipient.lower(), amount)
+        if now - self.recent.get(key, -999) < 5:
             return      # the same event arrived twice (Streamer.bot and a Fetch URL)
         self.recent[key] = now
-        if kind == "gift" and now < self.gift_bombs.get(user.lower(), 0):
-            return      # part of a gift bomb that was already thanked
+        if kind == "gift" and now - self.gift_bombs.get(user.lower(), -999) < 5:
+            return      # the gift bomb's own gifts, which were just thanked as one
         if anonymous:
             user = "an anonymous gifter"
         facts = self.person_facts(user, 3)
@@ -1343,7 +1353,7 @@ class Features:
             self.log_event(f"raid from {user} ({viewers} viewers)")
             await self.avatar_do("raid", user, n=viewers)
         elif kind == "giftbomb":
-            self.gift_bombs[user.lower()] = now + 60
+            self.gift_bombs[user.lower()] = now
             self.alert_task(f"{user} just gifted {count or 'a bunch of'}{tier_txt} subs to chat!{known} Lose your mind about it "
                       "for one or two sentences and thank them by name.")
             self.log_event(f"{user} gifted {count} subs")
@@ -1479,72 +1489,117 @@ class Features:
 
     # ------------------------------------------------------------ vision
 
+    def vision_ready(self):
+        """Vision is switched off only by a "can't see images" error from LM Studio, and tried again after 10 minutes."""
+        if not self.vision_ok and time.monotonic() - self.vision_off_at > 600:
+            self.vision_ok = True
+        return self.vision_ok
+
     async def look(self, prompt):
         """Screenshot of the stream -> one-line description from the vision model. None if unavailable."""
         vc = self.cfg["vision"]
-        if not vc.get("enabled") or not self.vision_ok or not (self.obs and self.obs.connected):
-            return None
-        try:
-            img = await self.obs.screenshot()
-        except Exception as e:
-            self.warn_once("shot", "Couldn't grab a screenshot from OBS: %s", e)
+        if not vc.get("enabled") or not self.vision_ready() or not (self.obs and self.obs.connected):
             return None
         brain = self.sk.brain
-        body = {"model": vc.get("model") or brain.model or "local-model", "temperature": 0.4, "max_tokens": 120,
-                "stream": False, "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": prompt + " No preamble."},
-                    {"type": "image_url", "image_url": {"url": img}}]}]}
-        if brain.llm.get("no_think", True):
-            body["reasoning_effort"] = "none"
-        try:
-            async with brain.session.post(brain.llm["base_url"] + "/chat/completions", json=body,
-                                          timeout=aiohttp.ClientTimeout(total=45)) as r:
-                if r.status >= 400:
-                    err = await r.text()
-                    if re.search(r"image|vision|multimodal|mmproj", err, re.I):
-                        self.vision_ok = False
-                        log.warning("The model in LM Studio can't see images, so screen glances are off. Load a "
-                                    "vision model (or set [vision] model in features.toml). (%s)", err[:150])
-                        return None
-                    raise RuntimeError(f"LM Studio {r.status}: {err[:150]}")
-                data = await r.json()
-            text = re.sub(r"<think>.*?(</think>|$)", "", data["choices"][0]["message"].get("content") or "", flags=re.S)
-            return re.sub(r"\s+", " ", text).strip() or None
-        except Exception as e:
-            log.warning("Screen glance failed: %s", e)
-            return None
+        for width in (960, 640):        # a payload-size error gets one retry at a smaller width
+            try:
+                img = await self.obs.screenshot(width)
+            except Exception as e:
+                self.warn_once("shot", "Couldn't grab a screenshot from OBS: %s", e)
+                return None
+            body = {"model": vc.get("model") or brain.model or "local-model", "temperature": 0.4, "max_tokens": 120,
+                    "stream": False, "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": prompt + " No preamble."},
+                        {"type": "image_url", "image_url": {"url": img}}]}]}
+            if brain.llm.get("no_think", True):
+                body["reasoning_effort"] = "none"
+            try:
+                async with brain.session.post(brain.llm["base_url"] + "/chat/completions", json=body,
+                                              timeout=aiohttp.ClientTimeout(total=45)) as r:
+                    if r.status >= 400:
+                        err = await r.text()
+                        if re.search(r"does not support|not a vision|mmproj|multimodal", err, re.I):
+                            self.vision_ok, self.vision_off_at = False, time.monotonic()
+                            log.warning("The model in LM Studio can't see images, so screen glances are off for 10 "
+                                        "minutes. Load a vision model (or set [vision] model in features.toml). (%s)",
+                                        err[:150])
+                            return None
+                        if r.status in (400, 413) and width == 960:
+                            log.info("LM Studio rejected the screenshot (%s), trying a smaller one", err[:120])
+                            continue
+                        raise RuntimeError(f"LM Studio {r.status}: {err[:150]}")
+                    data = await r.json()
+                text = re.sub(r"<think>.*?(</think>|$)", "", data["choices"][0]["message"].get("content") or "",
+                              flags=re.S)
+                return re.sub(r"\s+", " ", text).strip() or None
+            except Exception as e:
+                log.warning("Screen glance failed: %s", e)
+                return None
+        return None
 
     async def glance_now(self):
-        if not (self.cfg["vision"].get("enabled") and self.vision_ok and self.obs and self.obs.connected):
-            return False      # let the normal reply handle it
+        """"Look at this": he glances and reacts, or says he can't see the screen right now."""
+        if not (self.cfg["vision"].get("enabled") and self.vision_ready() and self.obs and self.obs.connected):
+            self.task(f"{self.streamer} asked you to look at the screen, but you can't see the screen right now. "
+                      "Say so briefly, in one short line, in character.")
+            return True
         await self.sk.send_overlays({"type": "thinking"})
-        desc = await self.look("You're a co-host glancing at the livestream. In one or two sentences, say what's on "
-                               "screen right now: the game or scene and what's happening.")
+        desc = await self.look("You're a co-host glancing at the livestream. In one or two sentences, say what's "
+                               "on screen right now: the game or scene and what's happening.")
         if not desc:
             await self.sk.send_overlays({"type": "idle"})
-            return False
+            self.task(f"{self.streamer} asked you to look at the screen, but you couldn't see it this time. Say so "
+                      "briefly, in one short line, in character.")
+            return True
         self.sk.remember("(stream event)", f"On screen: {desc}", "event")
         self.task(f"{self.streamer} told you to look at the screen. You see: {desc}. React to it like a co-host "
                   "watching along, one or two sentences. Don't describe it like a robot; react.")
         return True
 
+    def glance_in_background(self, job):
+        """A glance waits on LM Studio for seconds, so it runs as its own task. One at a time; the loop never waits."""
+        if self.glancing:
+            return False
+        self.glancing = True
+
+        async def run_job():
+            try:
+                await job()
+            except Exception as e:
+                log.warning("Screen glance failed: %s", e)
+            finally:
+                self.glancing = False
+        asyncio.create_task(run_job())
+        return True
+
     async def glance_tick(self, now):
         vc = self.cfg["vision"]
-        if not vc.get("enabled") or not self.vision_ok or self.sk.paused or self.sk.busy or self.sk.jobs:
+        if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.sk.jobs:
             return
-        if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race:
+        if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race or self.glancing:
             return
         self.last_glance = now
+        self.glance_in_background(self.glance_comment)
+
+    async def glance_comment(self):
         desc = await self.look("You're a co-host glancing at the livestream. In one sentence, say what's on screen "
                                "right now: the game or scene and what's happening.")
         if not desc:
             return
         self.sk.remember("(stream event)", f"On screen: {desc}", "event")
         cool = self.sk.beh.get("interject_cooldown_seconds", 45)
-        if time.monotonic() - self.sk.last_unprompted >= cool and random.random() < vc.get("comment_chance", 0.35):
+        if time.monotonic() - self.sk.last_unprompted >= cool and random.random() < self.cfg["vision"].get("comment_chance", 0.35):
             self.task(f"You just glanced at the stream and saw: {desc}. React to what's happening in one short "
                       "sentence, like a co-host watching along. Stay on what's on screen; no questions.",
                       unprompted=True)
+
+    async def race_glance(self, r):
+        desc = await self.look("This is a marble race game on a livestream. In one short sentence, say what's "
+                               "happening in the race right now: who's leading or doing well if names are "
+                               "visible, pileups, crashes, close calls.")
+        if desc and self.race is r:
+            self.task(f"Live marble race call! On screen right now: {desc}. Commentate it in one quick, excited "
+                      "sentence like a race announcer.")
 
     # ------------------------------------------------------------ games overlay
 
