@@ -874,9 +874,33 @@ function applySettings(set = {}) {
   }
   if (set.do && set.do.name) {                                     // one-shot from the control page or an app event (ignored when replayed later)
     const fresh = Math.abs(Date.now() - (set.do.at || 0)) < 15000;
-    const result = fresh ? doActivity(set.do.name, set.do) : "ignored: older than 15 s";
+    const result = fresh ? doClicked(set.do.name, set.do) : "ignored: older than 15 s";
     tell({ type: "did", name: set.do.name, result: result || "started" });   // the app logs it, so a missing reaction can be traced
   }
+}
+// A click on the control page or dock. Bits and activities can't run while he talks or thinks (the talk drive cancels them),
+// and cutting a running activity off snaps him out of his pose, so those clicks wait their turn: queuedDo plays when he is free.
+let queuedDo = null;
+function doClicked(name, info = {}) {
+  const ev = name === "stop" || name === "redeem" || JOBS[name]?.event;
+  if (ev || !(BITS[name] || JOBS[name])) { queuedDo = null; return doActivity(name, info); }
+  const off = currentMode() === "walkon" && nav.offscreen;
+  if (!(talking || thinking || Math.max(S.talk, S.think) > 0.05) && !off && !(job && job.phase !== "go")) {
+    queuedDo = null;
+    if (name === "embarrassed") { job = null; act = { name: null, t0: 0, dur: 0 }; }   // a click always blushes, even on the way somewhere
+    return doActivity(name, info);
+  }
+  if (job && job.phase === "do" && !job.def.event) endJob();     // get up / put things down first
+  if (off) nav.lingerUntil = S.t + 12;                           // walk-on mode: come on screen to do it
+  queuedDo = { name, info, t: S.t, arrive: off };
+  return talking || thinking ? "queued: plays when he finishes talking" : job ? "queued: plays when he finishes " + job.name : "queued: walking on first";
+}
+function runQueuedDo(want, busy) {                             // called every frame from update()
+  if (!queuedDo) return;
+  if (S.t - queuedDo.t > 60) { tell({ type: "did", name: queuedDo.name, result: "dropped: he stayed busy for a minute" }); queuedDo = null; return; }
+  if (want || busy > 0.05 || job || (queuedDo.arrive && (nav.offscreen || nav.moving > 0.1))) return;
+  const q = queuedDo; queuedDo = null;
+  tell({ type: "did", name: q.name, result: "played after waiting: " + (doActivity(q.name, q.info) || "started") });
 }
 function doActivity(name, info = {}) {
   audioCtx();                                                       // a user-visible event: set up the audio context if it isn't yet
@@ -892,7 +916,7 @@ function doActivity(name, info = {}) {
   }
   if (name === "embarrassed" && (job || act.name)) return "skipped: busy";   // only when he is free
   if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return "skipped: turned off on the control page"; pendingInfo = info || {}; }
-  if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; startGesture(name); }
+  if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; nav.holdUntil = S.t + BITS[name]; if (currentMode() === "walkon") nav.lingerUntil = Math.max(nav.lingerUntil || 0, S.t + BITS[name] + 3); startGesture(name); }
   else if (JOBS[name]) { job = null; startJob(name, true); }
   else return "ignored: unknown reaction";
 }
@@ -945,7 +969,7 @@ const debug = {
   setYaw: y => { nav.fixedYaw = (typeof y === "number") ? y : null; },
   setMode: m => applySettings({ mode: m }),
   gesture: name => startGesture(name),
-  doActivity: name => doActivity(name), endJob: () => endJob(), get job() { return job && { name: job.name, phase: job.phase, w: +job.w.toFixed(2) }; }, get props() { return Object.keys(PROPS); },
+  doActivity: name => doActivity(name), doClicked: name => doClicked(name), get queued() { return queuedDo && queuedDo.name; }, endJob: () => endJob(), get job() { return job && { name: job.name, phase: job.phase, w: +job.w.toFixed(2) }; }, get props() { return Object.keys(PROPS); },
   debugAct: () => ({ act: act.name, t: +S.t.toFixed(2), t0: act.t0, w: +J.w.toFixed(2), wP: +J.wP.toFixed(2), moving: +nav.moving.toFixed(2), busy: +Math.max(S.talk, S.think).toFixed(2) }),
   screenPos: () => { const v = byte.position.clone(); v.y += 1.2 * settings.size; v.project(camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; },
   teleport: (x, z) => { nav.x = x; nav.z = z; },
@@ -1312,7 +1336,7 @@ function startle() {                                          // drops what he's
 }
 function jobUpdate(t, dt, want, mode, size) {           // returns a nav target {x, z, speed} while a job steers him
   if (!job) {
-    if (!want && t > nextJob && !act.name && !nav.offscreen && mode !== "walkon") {
+    if (!want && t > nextJob && !act.name && !queuedDo && !nav.offscreen && mode !== "walkon") {
       const sc = scene_(), opts = Object.keys(JOBS).filter(n => (n !== lastJob || sc.stick === n) && !JOBS[n].manual && sceneAllows(n) && canDo(n, mode));
       if (opts.length) startJob(opts[Math.floor(Math.random() * opts.length)]);
       nextJob = t + (sc.stick ? 2 : rand(25, 55) * actGap());
@@ -2548,6 +2572,7 @@ function update(dt) {
   if (!stage.wide) { nav.tx = clamp(nav.tx, -xm, xm); nav.tz = clamp(nav.tz, stage.zFar, stage.zNear); }
 
   if (scene_().front && !job) nav.tz = Math.max(nav.tz, lerp(stage.zFar, stage.zNear, 0.65));   // chatting: hangs near the camera
+  if (act.name && BITS[act.name] && t < (nav.holdUntil || 0)) { nav.tx = nav.x; nav.tz = nav.z; }   // a bit plays where he stands, even in stay mode away from home
   const jn = jobUpdate(t, dt, want, mode, size);               // an activity steers him to its spot
   if (jn) { nav.tx = jn.x; nav.tz = jn.z; speed = jn.speed; }
   if (scene_().slow && !(job && job.def.event)) speed *= scene_().slow;
@@ -2572,12 +2597,15 @@ function update(dt) {
   hopV -= dt * 9; S.hop = Math.max(0, S.hop + hopV * dt); if (S.hop === 0) hopV = 0;
 
   // ---- one-off actions while idle: drag on the cigarette, scratch, fix the cap, stretch
-  if (!busy && !moving && !act.name && !job && t > nextIdleAct) {
+  runQueuedDo(want, busy);
+  if (busy < 0.05 && !moving && !act.name && !job && !queuedDo && t > nextIdleAct) {
     const pool = ["drag", "drag", "drag", "scratch", "cap", "stretch", ...Object.keys(BITS).filter(n => settings.acts.on[n] && n !== "embarrassed")].filter(n => sceneAllows(n) || ["drag", "scratch", "cap"].includes(n));
     startGesture(pool[Math.floor(Math.random() * pool.length)]);
     nextIdleAct = t + rand(14, 30) * actGap();
   }
-  if (act.name && (t - act.t0 > act.dur || (busy && act.name !== "wave") || moving)) { act = { name: null, t0: 0, dur: 0 }; nextIdleAct = Math.max(nextIdleAct, t + 6); }
+  // busy is a smoothed value that only decays toward 0 (it stays truthy for ~2 minutes after a line), so compare it to a threshold
+  const held = act.name && BITS[act.name] && t < (nav.holdUntil || 0);
+  if (act.name && (t - act.t0 > act.dur || (busy > 0.05 && act.name !== "wave") || (moving && !held))) { act = { name: null, t0: 0, dur: 0 }; nextIdleAct = Math.max(nextIdleAct, t + 6); }
   const ap = act.name ? (t - act.t0) / act.dur : 0;              // 0..1 progress of the action
   const dragging = act.name === "drag";
   const inhale = dragging ? clamp((ap - 0.25) / 0.3, 0, 1) * clamp((0.7 - ap) / 0.1, 0, 1) : 0;
