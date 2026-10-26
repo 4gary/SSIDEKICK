@@ -2724,11 +2724,13 @@ function update(dt) {
     bubble.style.left = px + "px"; bubble.style.top = py + "px";
   }
 }
+let lastFrameErr = null;
 function tick() {
+  requestAnimationFrame(tick);                        // queue the next frame first, so one bad prop frame can't freeze the overlay
   const dtf = Math.min(clock.getDelta(), 0.05);
-  if (!debug.frozen) update(dtf);                     // byteDebug.frozen = true holds the pose for preview screenshots
+  try { if (!debug.frozen) update(dtf); }            // byteDebug.frozen = true holds the pose for preview screenshots
+  catch (e) { if (String(e && e.message) !== lastFrameErr) { lastFrameErr = String(e && e.message); console.error(e); } }   // log each distinct error once
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
 }
 addEventListener("resize", resize);
 resize();
