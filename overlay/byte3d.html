@@ -1124,7 +1124,7 @@ for (const name of Object.keys(PROP_SLOTS)) {
     inst.root.visible = false;
     inst.root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
     scene.add(inst.root);
-    PROPS[name] = { inst, slot: PROP_SLOTS[name], spring: new Spring(140, 13), shown: false, linger: 0, st: { active: false } };
+    PROPS[name] = { key: name, inst, slot: PROP_SLOTS[name], spring: new Spring(140, 13), shown: false, linger: 0, st: { active: false } };
     if (m.buildHeadphones) {
       headphones = m.buildHeadphones(THREE, { mesh, group, sphere, canvasTex }).root;
       headphones.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
@@ -1159,6 +1159,16 @@ function freeX(x, z, xm) {                     // a job's stage spot at depth z:
   return x;
 }
 const propPt = (p, x, y, z) => p.inst.root.localToWorld(new THREE.Vector3(x, y, z));
+const _anchorWarned = new Set();
+function anchorsOf(p) {                                       // a renamed or missing prop anchor gets a stand-in at the prop's middle (warned once) instead of throwing
+  const A = p?.inst?.anchors || {};
+  return new Proxy(A, { get(t, k) {
+    if (typeof k !== "string" || k in t) return t[k];
+    const tag = (p?.key || "prop") + "." + k;
+    if (!_anchorWarned.has(tag)) { _anchorWarned.add(tag); console.warn("missing prop anchor", tag); }
+    return new THREE.Vector3(0, 0.6, 0);
+  } });
+}
 function poof(pos, n = 14, r = 0.9, color = null) {
   for (let i = 0; i < n; i++) {
     const a = i / n * Math.PI * 2;
@@ -1501,7 +1511,7 @@ function poseJob(t, dt) {
     J.torsoX = -0.28;
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(8, 16); }
     if (job.sub === 0) { J.armN = reachPose(armN, headPoint(-1.75, -0.1, 0.06)); J.armP = reachPose(armP, headPoint(1.75, -0.1, 0.06)); }      // hands behind head
-    else if (job.sub === 1) { J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, toTorso(propPt(p, p.inst.anchors.armrest.x, p.inst.anchors.armrest.y + 0.06, p.inst.anchors.armrest.z))); }
+    else if (job.sub === 1) { J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, toTorso(propPt(p, anchorsOf(p).armrest.x, anchorsOf(p).armrest.y + 0.06, anchorsOf(p).armrest.z))); }
     else { const munch = Math.max(0, Math.sin(t * 1.3)); J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, munch > 0.5 ? headPoint(0.15, -0.72, 0.12) : tp(0.42, 0.1, 0.2)); }
     J.wN = J.wP = k;
     J.neck = [-0.05, 0.2 * Math.sin(t * 0.25), 0.1]; J.neckW = k;
@@ -1524,7 +1534,7 @@ function poseJob(t, dt) {
     if (asleep && k > 0.8 && t > nextFloat) { head.getWorldPosition(tmp); tmp.y += 0.55 * size; floater(tmp, zTex, tmp2.set(0.12, 0.3, 0.05).multiplyScalar(size)); nextFloat = t + 1.4; }
     p.st = { active: k > 0.5, breath };
   } else if (name === "dj") {
-    const p = job.p, A = p.inst.anchors;
+    const p = job.p, A = anchorsOf(p);
     const beat = (t * 2.05) % 1;
     J.yaw = p.slot.yaw;
     if (t > job.nextSub) { job.sub = Math.random() < 0.25 ? 2 : Math.floor(Math.random() * 2); job.nextSub = t + rand(4, 9); }
@@ -1556,7 +1566,7 @@ function poseJob(t, dt) {
     J.face = fs => { fs.mouth.smile += 0.6; fs.mouth.open = Math.max(fs.mouth.open, onCap ? 0.35 : 0.2); fs.browY = fs.browY.map(v => v + 0.6); if (onCap) { fs.gx = 0; fs.gy = 1; fs.wide += 0.3; } };
     if (onCap) J.look = { x: 0, y: 1 };
   } else if (name === "desk" || name === "desknap") {
-    const p = job.p, u = p.inst.spots.use, A = p.inst.anchors, asleep = name === "desknap" && job.phase === "do" && t - job.t0 > 4;
+    const p = job.p, u = p.inst.spots.use, A = anchorsOf(p), asleep = name === "desknap" && job.phase === "do" && t - job.t0 > 4;
     const seat = propPt(p, u.x, u.y - 0.46, u.z - 0.1)   // a little back so his belly clears the desk;
     J.root = seat; J.rootQ = jv.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.slot.yaw).clone(); J.rootW = k;
     J.legs = SIT_LEGS.map((l, i) => ({ ...l, z: i ? 0.1 : -0.1 })); J.legW = k;
@@ -1593,7 +1603,7 @@ function poseJob(t, dt) {
     }
     p.st = { active: k > 0.5 && !asleep, typing, asleep };
   } else if (name === "arcade") {
-    const p = job.p, A = p.inst.anchors;
+    const p = job.p, A = anchorsOf(p);
     J.yaw = p.slot.yaw + ((job.spot && job.spot.yaw) || 0);     // the cabinet spot's facing (profile, so the screen shows)
     if (t > job.nextSub) { job.sub = Math.random() < 0.2 ? 1 + Math.floor(Math.random() * 2) : 0; job.nextSub = t + (job.sub ? 1.6 : rand(4, 9)); }
     const stick = { x: Math.sin(t * 5.3) * Math.sin(t * 1.3), y: Math.sin(t * 3.7) * 0.6 };
@@ -2001,7 +2011,7 @@ function ballUpdate(t, dt, size) {
   b.rot.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(dt * 9, dt * 4, 0)));
 }
 function poseJob3(name, t, dt, k) {
-  const size = settings.size, k2 = t - (job.d0 ?? job.t0), p = job.p, A = p ? p.inst.anchors : null;
+  const size = settings.size, k2 = t - (job.d0 ?? job.t0), p = job.p, A = p ? anchorsOf(p) : null;
   const spotYaw = p ? p.slot.yaw + ((job.spot && job.spot.yaw) || 0) : 0;
   if (name === "floorsit") {
     sitFloor(k, size);

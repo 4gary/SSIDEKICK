@@ -490,6 +490,23 @@ class ControlLogHandler(logging.Handler):
                 pass
 
 
+def retire_utf16_log(path):
+    """The old launcher wrote sidekick.log as UTF-16 (Tee-Object); set that file aside so the UTF-8 log doesn't start with a UTF-16 head."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(2)
+        if head != b"\xff\xfe":
+            return
+        old = path + ".utf16-old"
+        if os.path.exists(old):
+            os.remove(old)
+        os.replace(path, old)
+        print(f"moved the old UTF-16 sidekick.log to {os.path.basename(old)}")
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print("couldn't set aside the old UTF-16 sidekick.log:", e)
+
 def main():
     cfg_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE, "config.toml")
     with open(cfg_path, "rb") as f:
@@ -503,6 +520,7 @@ def main():
     console = logging.StreamHandler()
     console.setFormatter(fmt)
     # sidekick.log is written by Python itself (UTF-8, rotated at midnight, 7 days kept), so it survives a window close
+    retire_utf16_log(os.path.join(BASE, "sidekick.log"))
     logfile = logging.handlers.TimedRotatingFileHandler(os.path.join(BASE, "sidekick.log"), when="midnight",
                                                         backupCount=7, encoding="utf-8")
     logfile.setFormatter(fmt)
