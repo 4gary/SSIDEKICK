@@ -136,9 +136,9 @@ key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 key.shadow.camera.left = -3; key.shadow.camera.right = 3; key.shadow.camera.top = 3.5; key.shadow.camera.bottom = -1.5;
 key.shadow.camera.near = 0.5; key.shadow.camera.far = 20;
-key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025; key.shadow.radius = 5;
+key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025;
 scene.add(key); scene.add(key.target);
-const rim = new THREE.DirectionalLight(0xbfe0ff, 1.5);
+const rim = new THREE.DirectionalLight(0xbfe0ff, 2.0);   // from behind (the update loop keeps it at his back-left)
 scene.add(rim); scene.add(rim.target);
 const fill = new THREE.DirectionalLight(0xffd6c0, 0.55);
 scene.add(fill); scene.add(fill.target);
@@ -327,7 +327,6 @@ const M = {
   hair: new THREE.MeshStandardMaterial({ color: 0x5a3418, roughness: 0.85, bumpMap: fuzzBump, bumpScale: 2 }),
   stache: new THREE.MeshStandardMaterial({ color: 0x3f2310, roughness: 0.9 }),
   face: null,
-  cornea: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.06, clearcoat: 1, transparent: true, opacity: 0.16, depthWrite: false }),
   shirt: new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.9, bumpMap: fuzzBump, bumpScale: 0.4 }),
   jeans: new THREE.MeshStandardMaterial({ map: denimTex, roughness: 0.95 }),
   shoe: new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.55 }),
@@ -357,23 +356,24 @@ const hips = group(squash, [0, 0.46, 0]);
 const torso = group(hips);
 
 // body: a chubby lathe, striped tee, dark collar, belt line
-const bodyProfile = [[0.30, 0.0], [0.335, 0.12], [0.34, 0.28], [0.325, 0.44], [0.29, 0.56], [0.22, 0.64], [0.14, 0.69], [0.0, 0.70]]
+const bodyProfile = [[0.31, 0.0], [0.37, 0.12], [0.40, 0.28], [0.385, 0.44], [0.33, 0.57], [0.24, 0.65], [0.13, 0.70], [0.0, 0.70]]
   .map(([r, y]) => new THREE.Vector2(r, y));
-const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.145, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.685, 0.0], [1, 1, 0.86], [Math.PI / 2, 0, 0]);
-mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.14, 24), M.skin, torso, [0, 0.72, 0.0]);          // neck
-mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
+const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.95]);
+mesh(new THREE.TorusGeometry(0.165, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.68, 0.0], [1, 1, 0.95], [Math.PI / 2, 0, 0]);
+mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.2, 24), M.skin, torso, [0, 0.64, 0.0]);          // short neck: shows between the chin and the collar
+mesh(new THREE.CylinderGeometry(0.35, 0.32, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.95]);
+mesh(new THREE.TorusGeometry(0.345, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.95], [Math.PI / 2, 0, 0]); // belt
 
 // arms: shoulder + elbow pivots so they bend naturally
+const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.30 * side, 0.58, 0]);
-  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
-  mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.068, 0.16, 8, 16), M.skin, sh, [0, -0.18, 0]);   // upper arm
-  const el = group(sh, [0, -0.26, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.062, 0.17, 8, 16), M.skin, el, [0, -0.1, 0]);    // forearm
-  const hand = group(el, [0, -0.22, 0]);
+  const sh = group(torso, [0.36 * side, 0.62, 0]);
+  mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.14, 0.13, 0.13]);                                 // sleeve cap
+  mesh(new THREE.CylinderGeometry(0.11, 0.10, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);        // short sleeve
+  const up = mesh(new THREE.CapsuleGeometry(0.08, ARM_L1 - 0.12, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
+  const el = group(sh, [0, -ARM_L1, 0]);
+  const fore = mesh(new THREE.CapsuleGeometry(0.073, ARM_L2 - 0.106, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
+  const hand = group(el, [0, -ARM_L2, 0]);
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
   for (let i = 0; i < 3; i++) mesh(sphere, M.skin, hand, [(i - 1) * 0.045, -0.11, 0.01], [0.028, 0.035, 0.028]);  // finger bumps
@@ -384,9 +384,9 @@ const armN = arm(-1), armP = arm(1);              // armP holds the cigarette si
 
 function leg(side) {
   const hp = group(hips, [0.135 * side, 0.0, 0]);
-  mesh(new THREE.CapsuleGeometry(0.1, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);            // thigh
+  mesh(new THREE.CapsuleGeometry(0.12, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);           // thigh
   const kn = group(hp, [0, -0.21, 0]);
-  mesh(new THREE.CapsuleGeometry(0.088, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
+  mesh(new THREE.CapsuleGeometry(0.105, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
   const ft = group(kn, [0, -0.2, 0]);
   mesh(sphere, M.shoe, ft, [0, -0.0, 0.04], [0.115, 0.075, 0.165]);                           // sneaker body
   mesh(sphere, M.shoe, ft, [0, -0.01, 0.13], [0.1, 0.06, 0.09]);                              // toe cap
@@ -401,7 +401,7 @@ const neck = group(torso, [0, 0.70, 0]);
 const head = new THREE.Group(); head.position.y = 0.45;
 const HA = 0.66, HB = 0.60, HC = 0.62;          // head ellipsoid radii
 mesh(sphere, M.skin, head, [0, 0, 0], [HA, HB, HC]);
-mesh(sphere, M.skin, head, [0, -0.3, 0.05], [0.53, 0.3, 0.47]);  // chubby jaw/cheeks
+mesh(sphere, M.skin, head, [0, -0.28, 0.0], [0.62, 0.32, 0.40]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
 mesh(sphere, M.skin, head, [0, -0.25, 0.59], [0.07, 0.06, 0.065]);  // nose
 
 function onFace(obj, az, el, off = 0) {         // place on the head surface at azimuth/elevation (radians), local +z = surface normal
@@ -450,18 +450,13 @@ const F2P = {                                                    // face angle -
   s: FACE.W / (FACE.az1 - FACE.az0),                              // pixels per radian
 };
 const EYE = { az: 0.4, el: -0.26, w: 0.3, h: 0.27 };          // big banner eyes
-for (const side of [-1, 1]) {                                   // glossy corneas catch the light
-  const c = onFace(new THREE.Group(), EYE.az * side, EYE.el, 0.004);
-  const m = mesh(sphere, M.cornea, c, [0, 0, 0], [EYE.w * 0.62 * 0.9, EYE.h * 0.62 * 0.9, 0.05]);
-  m.castShadow = false; m.renderOrder = 2;
-}
 
 // mustache: a walrus of fuzzy lumps, drooping past the mouth corners
-const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setScalar(1.15);
+const stacheG = onFace(new THREE.Group(), 0, -0.47, -0.012); stacheG.scale.setScalar(1.15);
 {
   const parts = [];
   for (const side of [-1, 1]) {
-    const lumps = [[0.055, 0.0, 0.02, 0.085, 0.06, 0.05], [0.145, -0.03, 0.0, 0.07, 0.05, 0.045], [0.22, -0.085, -0.03, 0.05, 0.045, 0.035]];
+    const lumps = [[0.055, 0.02, 0.02, 0.085, 0.06, 0.05], [0.145, -0.01, 0.0, 0.07, 0.05, 0.045], [0.22, -0.05, -0.03, 0.05, 0.04, 0.035]];   // shorter droop so the open mouth shows below it
     for (const [x, y, z, sx, sy, sz] of lumps) {
       const g = new THREE.SphereGeometry(1, 24, 16);
       g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x * side, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -side * 0.5)), new THREE.Vector3(sx, sy, sz)));
@@ -475,7 +470,7 @@ const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setSc
 }
 
 // cigarette hanging out the right corner of the mouth
-const cig = onFace(new THREE.Group(), 0.2, -0.7, -0.015);
+const cig = onFace(new THREE.Group(), 0.2, -0.8, -0.015);
 cig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0.8, -0.28, 0.5).normalize());
 const cyl = (r, l) => new THREE.CylinderGeometry(r, r, l, 16).rotateX(Math.PI / 2).translate(0, 0, l / 2);
 mesh(cyl(0.026, 0.1), M.filter, cig);
@@ -485,35 +480,39 @@ const ember = mesh(sphere, M.ember, cig, [0, 0, 0.39], [0.024, 0.024, 0.012]);
 const emberLight = new THREE.PointLight(0xff6020, 0.15, 0.7, 2);
 emberLight.position.z = 0.4; cig.add(emberLight);
 
-// cap: oversized fuzzy felt crown with seams, a band, a button, and a big curved brim
+// cap: a felt crown that hugs the skull (about 0.06 proud of it), a short band at the rim, a button, and a visor
+// capG keeps its pivot (animation moves it); capIn holds the geometry, centred on the crown (head 0, 0.04, -0.02)
 const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = -0.05;
+const capIn = group(capG, [0, -0.16, 0.01]);
 {
-  const crownGeo = new THREE.SphereGeometry(0.80, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.515).scale(1, 0.84, 1.0);
-  const crown = mesh(crownGeo, M.cap, capG);
+  const crownGeo = new THREE.SphereGeometry(1, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.73, 0.66, 0.69);
+  const crown = mesh(crownGeo, M.cap, capIn);
   crown.material = M.cap.clone(); crown.material.side = THREE.DoubleSide;
-  capG.add(makeFur(crownGeo, M.cap, { layers: 18, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
-  const bandGeo = new THREE.TorusGeometry(0.795, 0.035, 12, 72).rotateX(Math.PI / 2).translate(0, -0.03, 0);
-  mesh(bandGeo, M.capPlain, capG);
-  capG.add(makeFur(bandGeo, M.capPlain, { layers: 10, length: 0.03, density: 90, root: 0.6, tip: 1.1 }));
-  const buttonGeo = new THREE.SphereGeometry(0.055, 24, 16).scale(1, 0.6, 1).translate(0, 0.67, 0);
-  mesh(buttonGeo, M.capPlain, capG);
-  capG.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
+  capIn.add(makeFur(crownGeo, M.cap, { layers: 10, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
+  const bandGeo = new THREE.TorusGeometry(0.735, 0.035, 12, 72).rotateX(Math.PI / 2).scale(1, 1, 0.95);
+  mesh(bandGeo, M.capPlain, capIn);
+  capIn.add(makeFur(bandGeo, M.capPlain, { layers: 10, length: 0.03, density: 90, root: 0.6, tip: 1.1 }));
+  const buttonGeo = new THREE.SphereGeometry(0.055, 24, 16).scale(1, 0.6, 1).translate(0, 0.66, 0);
+  mesh(buttonGeo, M.capPlain, capIn);
+  capIn.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
 
-  // brim: extruded half-ellipse, bent down at the sides and front
+  // visor: a crescent that starts at the band front and widens forward, bent down a little at the sides
   const bs = new THREE.Shape();
-  bs.moveTo(-0.78, -0.3); bs.lineTo(0.78, -0.3); bs.lineTo(0.78, 0);
-  bs.absellipse(0, 0, 0.78, 0.62, 0, Math.PI, false);
-  bs.lineTo(-0.78, -0.3);
+  bs.moveTo(0.735, 0);
+  bs.absellipse(0, 0, 0.735, 0.70, 0, Math.PI, false);      // inner edge follows the band's front half
+  bs.lineTo(-0.80, 0);
+  bs.absellipse(0, 0, 0.80, 1.2, Math.PI, 0, true);         // outer edge, out to the visor front
+  bs.closePath();
   const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.045, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 40 });
   brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.045, 0);
   const bp = brimGeo.attributes.position;
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), z = bp.getZ(i);
-    const f = clamp(z / 0.62, 0, 1);
-    bp.setY(i, bp.getY(i) - 0.34 * (x / 0.78) ** 2 * (0.3 + 0.7 * f) - 0.04 * f * f);
+    const f = clamp(z / 1.2, 0, 1);
+    bp.setY(i, bp.getY(i) - 0.10 * (x / 0.8) ** 2 * (0.4 + 0.6 * f) - 0.03 * f * f);   // slight downward curve, sides lower
   }
   brimGeo.computeVertexNormals();
-  const brim = group(capG, [0, -0.035, 0.5]); brim.rotation.x = 0.0;
+  const brim = group(capIn);
   mesh(brimGeo, M.brim, brim);
   brim.add(makeFur(brimGeo, M.brim, { layers: 8, length: 0.022, density: 110, gravity: 0.2, root: 0.6, tip: 1.12 }));
 }
@@ -539,22 +538,22 @@ const hairG = group(head);
 const hairSpring = new Spring(40, 6);
 {
   // hair follows the head: full under the cap rim (so the cap sits on hair, not on air), hugging the skull down to the nape
-  const front = 1.0, nu = 150, nv = 36, capR = 0.79;
+  const front = 1.0, nu = 150, nv = 36;
   const pos = [], uv = [], idx = [];
   const ss = (a, b, x) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
   for (let i = 0; i <= nu; i++) {
     const az = front + (Math.PI * 2 - front * 2) * i / nu;           // around the back, from one cheek to the other (0 = face)
     const side = Math.abs(Math.atan2(Math.sin(az), Math.cos(az)));    // 0 at the face .. pi at the back of the head
     const nearFace = 1 - ss(front, front + 0.8, side);               // sideburns by the cheeks are shorter
-    const lock = 0.5 + 0.5 * Math.sin(az * 31 + Math.cos(az * 9) * 2);
-    const elB = lerp(-0.78, -0.3, nearFace) - 0.06 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
+    const lock = 0.5 + 0.5 * Math.sin(az * 13 + Math.cos(az * 5) * 2);
+    const elB = lerp(-0.78, -0.3, nearFace) - 0.02 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
     const elT = 0.62;                                                // starts up inside the cap
     for (let j = 0; j <= nv; j++) {
       const el = lerp(elT, elB, j / nv);
       const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
       const hr = Math.hypot(x, z);
       const fill = 1 - ss(-0.15, 0.3, el);                            // 0 up by the cap rim, 1 lower down
-      const want = lerp(Math.max(hr + 0.04, Math.min(capR, hr + 0.16)), hr + 0.025 + 0.01 * Math.sin(az * 47), fill);
+      const want = lerp(hr + 0.03, hr + 0.025 + 0.01 * Math.sin(az * 47), fill);   // 0.03 off the skull: the cap covers the top
       const k = want / Math.max(hr, 1e-3);
       pos.push(x * k, y, z * k); uv.push(i / nu, j / nv);
     }
@@ -645,8 +644,8 @@ function drawEye(side, i) {
   g.strokeStyle = "#2b1606"; g.lineWidth = r * 0.14; g.stroke();
   const pr = r * 0.46 * face.pupil;
   g.fillStyle = "#0d0704"; g.beginPath(); g.arc(0, 0, pr, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(-r * 0.33, -r * 0.36, r * 0.27, r * 0.22, -0.5, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(r * 0.33, -r * 0.36, r * 0.27, r * 0.22, 0.5, 0, Math.PI * 2); g.fill();   // toward the key light (upper right)
+  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(-r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
   g.fillStyle = "rgba(255,230,200,.25)"; g.beginPath(); g.arc(0, r * 0.45, r * 0.5, 0.3, Math.PI - 0.3); g.fill();
   g.restore();
   // upper lid (sleepy / skeptical) and lower lid (smile squint), drawn inside the eye
@@ -688,7 +687,7 @@ function drawBrow(side, i) {
 }
 function drawMouth() {
   const g = fg, m = face.mouth;
-  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.68);
+  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.80);
   const hw = 0.145 * F2P.s * m.width * (1 - 0.45 * m.round);
   const open = m.open * (0.75 + 0.5 * m.round);
   const corner = -m.smile * hw * 0.32;                      // corners up for a smile
@@ -732,11 +731,20 @@ function drawMouth() {
   }
   g.restore();
 }
-let lastFaceKey = "";
+let lastFaceKey = "", lastFaceDraw = 0;
+function faceKey() {                                              // quantised face state as a string; gaze and pupil to 1/40 so jitter does not redraw
+  const f = face, m = f.mouth;
+  let k = "";
+  for (let i = 0; i < 2; i++) k += Math.round(f.squash[i] * 80) + "," + Math.round(f.lid[i] * 80) + "," + Math.round(f.lower[i] * 80) + "," + Math.round(f.browY[i] * 80) + "," + Math.round(f.browTilt[i] * 80) + "|";
+  return k + Math.round(f.wide * 80) + "," + Math.round(f.gx * 40) + "," + Math.round(f.gy * 40) + "," + Math.round(f.pupil * 40) + "," + Math.round(f.blush * 80) + "|" +
+    Math.round(m.open * 80) + "," + Math.round(m.width * 80) + "," + Math.round(m.round * 80) + "," + Math.round(m.smile * 80) + "," + Math.round(m.shift * 80);
+}
 function drawFace() {
-  const key = JSON.stringify(face, (k, v) => typeof v === "number" ? Math.round(v * 80) : v);
+  const key = faceKey();
   if (key === lastFaceKey) return;
-  lastFaceKey = key;
+  const now = performance.now();
+  if (now - lastFaceDraw < 1000 / 30) return;                     // at most 30 redraws a second; the key stays stale, so the next call retries
+  lastFaceDraw = now; lastFaceKey = key;
   const g = fg;
   g.clearRect(0, 0, FACE.W, FACE.H);
   for (const side of [-1, 1]) {                               // cheeks
