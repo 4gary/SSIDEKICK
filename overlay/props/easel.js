@@ -224,7 +224,9 @@ export function build(THREE, ctx) {
   mesh(sphere, yellowMat, root, [TX + 0.1, 0.35, TZ - 0.05], [0.014, 0.02, 0.014]);
 
   // ---------- state ----------
-  let lastP = -1, lastF = false;
+  // the flourish animates the shine and sparkles, so while it runs the canvas is redrawn at most every 50 ms (20 Hz);
+  // otherwise it is redrawn only when the strokes change, or once when the flourish ends
+  let lastP = -1, lastF = false, lastT = -1;
 
   return {
     root,
@@ -232,11 +234,13 @@ export function build(THREE, ctx) {
     anchors: { brushTarget: new THREE.Vector3(0, 0.72, 0.01) },
     update(dt, t, st) {
       const p = clamp(st && typeof st.paint === 'number' ? st.paint : 0, 0, 1);
-      const f = !!(st && st.flourish);
-      if (p !== lastP || f || lastF) {
-        drawPaint(paintTex.userData.ctx, p, t || 0, f);
+      const f = !!(st && st.flourish), tt = t || 0;
+      const endedFlourish = lastF && !f; lastF = f;
+      const redraw = f ? (lastT < 0 || Math.abs(tt - lastT) >= 0.05) : (p !== lastP || endedFlourish);
+      if (redraw) {
+        drawPaint(paintTex.userData.ctx, p, tt, f);
         paintTex.needsUpdate = true;
-        lastP = p; lastF = f;
+        lastP = p; lastT = tt;
       }
     },
     dispose() {
