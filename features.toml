@@ -34,6 +34,7 @@ first_chatter_shoutout = true
 # Raids, subs, gifts, cheers and follows come straight from Streamer.bot, nothing to set up.
 enabled = true
 follows = true               # set false if follows get spammy
+redeems = true               # say something when someone redeems channel points
 shoutout_keyword = "shout"   # if a Sidekick action has this in its name, Gary runs it for raiders (with %sidekickUser%)
 
 [polls]

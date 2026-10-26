@@ -36,7 +36,7 @@ DEFAULTS = {
                       "effect_seconds": 10},
     "regulars": {"enabled": True, "regular_after_days": 3, "greet_new": True, "welcome_back_days": 14,
                  "greet_gap_seconds": 40, "first_chatter_shoutout": True},
-    "events": {"enabled": True, "follows": True, "shoutout_keyword": "shout"},
+    "events": {"enabled": True, "follows": True, "redeems": True, "shoutout_keyword": "shout"},
     "polls": {"seconds": 90, "trivia_seconds": 30, "trivia_rounds": 3, "predict_seconds": 120, "chat_messages": True},
     "race": {"predictions": True, "pick_seconds": 45, "glance_after_seconds": 25, "start_on_scene": "",
              "winner_chat_pattern": ""},
@@ -159,7 +159,10 @@ class Features:
         return self.sk.bot["streamer_name"]
 
     def task(self, prompt, unprompted=False, alert=False):
-        self.sk.jobs.append(("alert" if alert else "task", None, prompt))
+        if alert:
+            self.sk.jobs.appendleft(("alert", None, prompt))   # ahead of chat, so it lands with the 3D reaction
+        else:
+            self.sk.jobs.append(("task", None, prompt))
         if unprompted:
             self.sk.last_unprompted = time.monotonic()
 
@@ -193,8 +196,24 @@ class Features:
         do.update({k: v for k, v in info.items() if v not in (None, "", 0)})
         await self.sk.send_overlays({"type": "avatar", "set": {"do": do}})
 
+    ALERT_ANGLES = [
+        "act shocked and suspicious, like they clearly made a terrible decision",
+        "warn them, half-joking, about what they just signed up for",
+        "hype it up like a sports announcer for a second",
+        "be weirdly sincere for a moment, then undercut it with a joke",
+        "tie it to whatever is happening on stream or in chat right now",
+        "roast dum a little for not deserving this",
+        "make up a tiny ridiculous detail about them, clearly as a joke",
+        "act like this is the biggest moment in DUMSTREAM history",
+        "be dry and deadpan about it",
+        "give them a fake title or award on the spot",
+    ]
+
     def alert_task(self, prompt):
-        self.task(prompt, alert=True)
+        angle = random.choice(self.ALERT_ANGLES)
+        self.task(prompt + f" This time, {angle}. Make it sound off the cuff, like you just noticed it. Never use stock "
+                  "lines like 'thanks for the follow', 'thank you for subscribing' or 'welcome to the stream', and don't "
+                  "start the way you started your last alert. Keep it short.", alert=True)
 
     def say(self, text):
         self.sk.jobs.append(("say", None, text))
@@ -1212,6 +1231,10 @@ class Features:
             reward = data.get("reward") if isinstance(data.get("reward"), dict) else {}
             title = _first(reward, ("title", "name")) or _first(data, ("rewardName", "reward_title", "title")) or "a redeem"
             await self.avatar_do("redeem", user, title=title)
+            now = time.monotonic()
+            if self.cfg["events"].get("redeems", True) and now - self.recent.get("redeem_said", -999) > 30:
+                self.recent["redeem_said"] = now
+                self.alert_task(f'{user} just redeemed "{title}" with channel points. React to it by name in one sentence.')
             return
         kind = {"Raid": "raid", "Sub": "sub", "ReSub": "resub", "GiftSub": "gift", "GiftBomb": "giftbomb",
                 "Cheer": "cheer", "Follow": "follow"}.get(etype)
@@ -1278,12 +1301,12 @@ class Features:
             await self.avatar_do("sub", user, n=1)
         elif kind in ("sub", "resub"):
             span = f"for {months} months" if months > 1 else "for the first time"
-            self.alert_task(f"{user} just subscribed{tier_txt} {span}.{known} Thank them by name in one or two sentences; if "
+            self.alert_task(f"{user} just subscribed{tier_txt} {span}.{known} Say something about it, using their name, in one or two sentences; if "
                       "you remember something about them, work it in. Milestones (6, 12, 24 months) deserve extra hype.")
             self.log_event(f"{user} subscribed{tier_txt} ({months or 1} months)")
             await self.avatar_do("sub", user, months=months or 1)
         elif kind == "cheer":
-            self.alert_task(f"{user} just cheered {bits} bits.{known} Thank them by name in one sentence, bigger hype for "
+            self.alert_task(f"{user} just cheered {bits} bits.{known} React by name in one sentence, bigger hype for "
                       "bigger amounts.")
             self.log_event(f"{user} cheered {bits} bits")
             await self.avatar_do("bits", user, n=bits)
@@ -1294,10 +1317,10 @@ class Features:
         await self.broadcast()
 
     def follow_tick(self, now):
-        if self.follows and not self.sk.busy and not self.sk.jobs and now - self.recent.get("follow_said", -999) > 60:
+        if self.follows and not self.sk.busy and now - self.recent.get("follow_said", -999) > 20:
             names, self.follows = self.follows[:5], self.follows[5:]
             self.recent["follow_said"] = now
-            self.alert_task(f"New follower{'s' if len(names) > 1 else ''}: {', '.join(names)}. Welcome them by name in one "
+            self.alert_task(f"New follower{'s' if len(names) > 1 else ''}: {', '.join(names)}. Riff on it by name in one "
                       "quick sentence.")
             asyncio.create_task(self.avatar_do("follow", ", ".join(names), n=len(names)))
 

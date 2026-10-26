@@ -1,0 +1,98 @@
+GARY COMMANDS
+=============
+Say "Gary" in the sentence so he knows it's for him (mic or typed in the control page).
+Words in [brackets] are optional. Most commands match loosely, so close wording works too.
+
+
+MOVING AROUND / STAYING STILL  (this is the stationary toggle)
+---------------------------------------------------------------
+Stationary ON:
+  "Gary, stay put"                  "Gary, stay still"        "Gary, don't move"
+  "Gary, stop moving"               "Gary, stand still"       "Gary, stay stationary"
+  "Gary, stay at the bottom"        (stays put, close to the camera)
+  "Gary, stay put on the left"      / "on the right" / "in the middle" / "in the back"
+
+Moving again (pick how much):
+  "Gary, wander around"             small: paces around his spot (add "at the bottom", "on the left" etc.)
+  "Gary, free roam"                 big: walks all over the stage and uses props
+  "Gary, walk on mode"              hides until he has something to say
+
+He remembers the last setting after a restart. In stay mode he doesn't use the prop
+activities (DJ deck, couch, bed, arcade...); those only happen in wander/free roam.
+You can also switch these and turn single activities on/off on the control page
+(http://localhost:7777/control, card "What the 3D sidekick does on his own").
+
+
+QUIET / PAUSE
+-------------
+  "Gary, hold that thought" / "hang on" / "wait" / "stop"   cuts him off mid-line
+  "Gary, go ahead" / "what were you saying"                  finishes the line you cut off
+  "Gary, stop talking for 15 minutes"                        muted for that long (max 60)
+  "Gary, be quiet" / "shut up" / "shush"                     muted until you call him back
+  "Gary, take five" / "take ten"                             5 / 10 minutes
+  "Gary, go away for 10 minutes"                             muted, but stays on screen doing idle stuff
+  "Gary, you can talk again" / "come back" / "unmute"        ends the mute
+  Saying "Gary" to him while he's muted also brings him back.
+While muted he ignores chat but still reacts to follows, subs, bits, raids and redeems.
+
+
+VOICE EFFECTS (on you, through Streamer.bot)
+--------------------------------------------
+  "Gary, robot voice me" / "give me the helium voice" / "make me deep voice"
+  Voices: robot, helium, deep, echo, alien
+  "Gary, random voice please"                                he picks one
+  "Gary, normal voice" / "turn off the voice"                back to normal
+He sometimes puts one on you by himself (every 20+ minutes at most).
+
+
+STREAM FX
+---------
+  "Gary, put me on acid" / "acid trip me"                    FX - DUM ON ACID
+  "Gary, make me drunk"                                      FX - MAKE DUM DRUNK
+  (Both actions need to be in the Streamer.bot "Sidekick" group.)
+
+
+3D REACTIONS
+------------
+  "Gary, hype it up" / "celebrate" / "party time" / "Gary, let's go"    hype party
+  "Gary, rip" / "press F" / "I died" / "pay respects"                   rip animation
+Chat can set these off too: hype emotes / LETS GO spam, or a wave of F's.
+
+
+GAMES
+-----
+  "Gary, start a poll: pizza or tacos or sushi"              poll with your options
+  "Gary, start a poll about snacks"                          he makes one up
+  "Gary, end the poll"
+  "Gary, trivia time"  /  "Gary, trivia about movies, 5 rounds"  /  "Gary, stop trivia"
+  "Gary, start a prediction: will I beat the boss"
+  "Gary, lock the prediction" / "Gary, cancel the prediction"
+  "Gary, the answer is yes" / "Gary, option 2 won"           pays out the prediction
+  "Gary, who's winning" / "leaderboard"                      points leaderboard
+Chat: types 1/2/3 or !vote 2 for polls, a/b/c/d for trivia, !pick <name> for predictions and races.
+
+
+MARBLE RACES
+------------
+  "Gary, the marble race is starting"  /  "Gary, start a race"
+  "Gary, Kevin won"  /  "Gary, the winner is Kevin"
+  "Gary, the race is over"
+
+
+CLIPS, VISION, RECAP
+--------------------
+  "Gary, clip that"                                          runs the Clip It action and saves the moment
+  "Gary, look at this" / "what do you see" / "watch this"    he looks at the stream and reacts
+  "Gary, recap the stream" / "wrap it up"                    end-of-stream recap
+
+
+SCENES (automatic, no command)
+------------------------------
+OBS scene names change his mode: starting, brb, chatting, gaming, marble, chill, party, ending.
+Scenes with "news" or "weather" in the name make him the DUMSTREAM News co-anchor / Weather guy.
+
+
+TEST LINKS (paste in a browser while Gary is running)
+-----------------------------------------------------
+  http://localhost:7777/api/do?name=raid&who=Bob&n=50       (raid, sub, bits, follow, hype, rip, redeem)
+  http://localhost:7777/games/control                       buttons for polls, trivia, races, test events
