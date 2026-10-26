@@ -67,9 +67,29 @@
     <div class="row" style="margin-top:10px">
       <label style="display:flex;align-items:center;gap:8px;margin:0">How often <select id="actGap"><option value="2">Now and then</option><option value="1" selected>Normal</option><option value="0.5">A lot</option></select></label>
       <label style="display:flex;align-items:center;gap:8px;margin:0">Props <select id="actProps"><option value="use" selected>Only while he uses them</option><option value="always">Always out</option></select></label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="actSfx" checked style="flex:0 0 auto;min-width:0;width:16px;height:16px;accent-color:var(--accent)"> Sound effects</label>
       <button class="ghost" id="actStop">Stop what he's doing</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:8px">Tick what he's allowed to do when nobody is talking to him. "Do it" makes him do it right now. He drops anything the moment he has something to say. Props only show up while he walks over to use them. The DJ deck, couch, bed, arcade, desk and butterfly need Wander or Free roam.</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Tick what he's allowed to do when nobody is talking to him. "Do it" makes him do it right now. He drops anything the moment he has something to say. Props only show up while he walks over to use them. The DJ deck, couch, bed, arcade, desk, butterfly, gym, fridge, plant and easel need Wander or Free roam. Sign, marble race and goodbye only happen when you press Do it.</div>
+  </div>
+  <div class="card">
+    <label>Stream mode (3D overlay only): changes what he does to fit the moment</label>
+    <div class="row">
+      <select id="scene" style="flex:0 0 220px">
+        <option value="normal">Normal</option><option value="starting">Starting soon</option><option value="brb">BRB</option><option value="chatting">Just chatting</option>
+        <option value="gaming">Gaming (sits at desk)</option><option value="marble">Marble race</option><option value="chill">Chill</option><option value="party">Party</option><option value="ending">Ending (waves goodbye)</option>
+      </select>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Starting soon and BRB hold up a sign first. Gaming keeps him at his desk, marble keeps him cheering. Party brings out a disco ball and makes him busier. Ending waves, bows and walks off.</div>
+  </div>
+  <div class="card">
+    <label>Test the big stream event reactions (3D overlay only)</label>
+    <div class="row">
+      <input class="small" id="evWho" value="CoolDude42">
+      <button class="ghost" data-ev="raid">Raid</button><button class="ghost" data-ev="sub">Sub</button><button class="ghost" data-ev="resub">Resub</button><button class="ghost" data-ev="bits">Bits</button>
+      <button class="ghost" data-ev="follow">Follow</button><button class="ghost" data-ev="hype">Hype</button><button class="ghost" data-ev="rip">RIP</button><button class="ghost" data-ev="redeem">Redeem</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">These only play the animation and sound on the overlay. Gary won't say anything.</div>
   </div>
   <div class="card"><label>Log</label><div id="log"></div></div>
 </main>
@@ -91,18 +111,28 @@ $("home").onchange = () => send({ type: "avatar", set: { home: { x: Number($("ho
 $("size").oninput = () => { $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; };
 $("size").onchange = () => send({ type: "avatar", set: { size: Number($("size").value) } });
 const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose, flick it"], ["armpit", "Sniff armpit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Chase a butterfly"],
-  ["stare", "Stare at the viewer"], ["phone", "Texting on his phone"], ["lieback", "Lie on his back"], ["dj", "DJ set"], ["couch", "Chill on the couch"], ["nap", "Nap in bed"], ["arcade", "Play arcade"], ["desk", "Sit at his desk"], ["desknap", "Doze off at the desk"]];
-const actState = { on: Object.fromEntries(ACTS.map(([k]) => [k, true])), gap: 1, props: "use" };
-$("acts").innerHTML = ACTS.map(([k, n]) => `<div class="act"><input type="checkbox" data-act="${k}" checked><span>${n}</span><button class="ghost" data-do="${k}">Do it</button></div>`).join("");
+  ["yawn", "Big yawn"], ["knuckles", "Crack knuckles"], ["watch", "Check his watch"], ["shoe", "Tie his shoe"], ["whistle", "Whistle a tune"], ["mutter", "Mutter to himself"], ["embarrassed", "Get embarrassed"], ["mictest", "Mic check"],
+  ["stare", "Stare at the viewer"], ["phone", "Texting on his phone"], ["lieback", "Lie on his back"], ["dj", "DJ set"], ["couch", "Chill on the couch"], ["nap", "Nap in bed"], ["arcade", "Play arcade"], ["desk", "Sit at his desk"], ["desknap", "Doze off at the desk"],
+  ["floorsit", "Sit on the floor"], ["snack", "Eat a snack"], ["read", "Read a book or paper"], ["ball", "Juggle a ball"], ["fishing", "Go fishing"], ["exercise", "Work out"], ["punch", "Punching bag"], ["yoga", "Yoga"], ["beer", "Drink a beer"], ["plant", "Water his plant"], ["paint", "Paint a picture"],
+  ["sign", "Hold up a sign"], ["marble", "Cheer the marble race"], ["goodbye", "Wave goodbye and leave"]];
+const MANUAL = new Set(["sign", "marble", "goodbye"]);
+const actState = { on: Object.fromEntries(ACTS.filter(([k]) => !MANUAL.has(k)).map(([k]) => [k, true])), gap: 1, props: "use", scene: "normal", sfx: true };
+$("acts").innerHTML = ACTS.map(([k, n]) => `<div class="act">${MANUAL.has(k) ? '<span style="flex:0 0 16px"></span>' : `<input type="checkbox" data-act="${k}" checked>`}<span>${n}</span><button class="ghost" data-do="${k}">Do it</button></div>`).join("");
 const sendActs = () => send({ type: "avatar", set: { acts: actState } });
 document.querySelectorAll("[data-act]").forEach(c => c.onchange = () => { actState.on[c.dataset.act] = c.checked; sendActs(); });
 document.querySelectorAll("[data-do]").forEach(b => b.onclick = () => send({ type: "avatar", set: { do: { name: b.dataset.do, at: Date.now() } } }));
 $("actStop").onclick = () => send({ type: "avatar", set: { do: { name: "stop", at: Date.now() } } });
+$("actSfx").onchange = () => { actState.sfx = $("actSfx").checked; sendActs(); };
+$("scene").onchange = () => { actState.scene = $("scene").value; send({ type: "avatar", set: { acts: { ...actState, sceneAt: Date.now() } } }); };
+const EV = { raid: { name: "raid", n: 42 }, sub: { name: "sub" }, resub: { name: "sub", months: 7 }, bits: { name: "bits", n: 500 }, follow: { name: "follow" }, hype: { name: "hype" }, rip: { name: "rip" }, redeem: { name: "redeem", title: "Hydrate" } };
+document.querySelectorAll("[data-ev]").forEach(b => b.onclick = () => send({ type: "avatar", set: { do: { ...EV[b.dataset.ev], who: $("evWho").value || "someone", at: Date.now() } } }));
 $("actGap").onchange = () => { actState.gap = Number($("actGap").value); sendActs(); };
 $("actProps").onchange = () => { actState.props = $("actProps").value; sendActs(); };
 function applyAvatar(a) {
   if (a.acts) {
     Object.assign(actState.on, a.acts.on || {}); if (a.acts.gap) actState.gap = a.acts.gap; if (a.acts.props) actState.props = a.acts.props;
+    if (a.acts.scene) actState.scene = a.acts.scene; if (a.acts.sfx !== undefined) actState.sfx = a.acts.sfx;
+    $("scene").value = actState.scene; $("actSfx").checked = actState.sfx !== false;
     document.querySelectorAll("[data-act]").forEach(c => c.checked = actState.on[c.dataset.act] !== false);
     $("actGap").value = String(actState.gap); $("actProps").value = actState.props;
   }

@@ -87,6 +87,10 @@
   <details data-k="acts"><summary>Do something</summary><div class="body">
     <div class="grid" id="acts"></div>
     <button class="danger" data-do="stop">Stop what he's doing</button>
+    <div class="lbl">Stream mode</div>
+    <select id="scene"><option value="normal">Normal</option><option value="starting">Starting soon</option><option value="brb">BRB</option><option value="chatting">Just chatting</option><option value="gaming">Gaming</option><option value="marble">Marble race</option><option value="chill">Chill</option><option value="party">Party</option><option value="ending">Ending</option></select>
+    <div class="lbl">Event test (animation only)</div>
+    <div class="grid four" id="evs"><button data-ev="raid">Raid</button><button data-ev="sub">Sub</button><button data-ev="bits">Bits</button><button data-ev="follow">Follow</button><button data-ev="hype">Hype</button><button data-ev="rip">RIP</button><button data-ev="redeem">Redeem</button></div>
   </div></details>
 
   <details data-k="fx"><summary>Voice FX on your mic</summary><div class="body">
@@ -198,11 +202,18 @@ $("size").onchange = () => setAvatar({ size: Number($("size").value) });
 
 // activities (same list as the full control page)
 const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose"], ["armpit", "Sniff pit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Butterfly"],
-  ["stare", "Stare"], ["phone", "Phone"], ["lieback", "Lie back"], ["dj", "DJ set"], ["couch", "Couch"], ["nap", "Nap"], ["arcade", "Arcade"], ["desk", "Desk"], ["desknap", "Desk nap"]];
+  ["yawn", "Yawn"], ["knuckles", "Knuckles"], ["watch", "Watch"], ["shoe", "Tie shoe"], ["whistle", "Whistle"], ["mutter", "Mutter"], ["embarrassed", "Blush"], ["mictest", "Mic check"],
+  ["stare", "Stare"], ["phone", "Phone"], ["lieback", "Lie back"], ["dj", "DJ set"], ["couch", "Couch"], ["nap", "Nap"], ["arcade", "Arcade"], ["desk", "Desk"], ["desknap", "Desk nap"],
+  ["floorsit", "Floor sit"], ["snack", "Snack"], ["read", "Read"], ["ball", "Juggle"], ["fishing", "Fishing"], ["exercise", "Work out"], ["punch", "Punch bag"], ["yoga", "Yoga"], ["beer", "Beer"], ["plant", "Plant"], ["paint", "Paint"],
+  ["sign", "Sign"], ["marble", "Marble cheer"], ["goodbye", "Goodbye"]];
 $("acts").innerHTML = ACTS.map(([k, n]) => `<button data-do="${k}">${n}</button>`).join("");
 
+const EV = { raid: { n: 42 }, sub: {}, bits: { n: 500 }, follow: {}, hype: {}, rip: {}, redeem: { title: "Hydrate" } };
+$("evs").querySelectorAll("button").forEach(b => b.onclick = () => { send({ type: "avatar", set: { do: { name: b.dataset.ev, who: "TestViewer", ...EV[b.dataset.ev], at: Date.now() } } }); flash(b); });
+$("scene").onchange = () => send({ type: "avatar", set: { acts: { ...(avatar.acts || {}), scene: $("scene").value, sceneAt: Date.now() } } });
 function applyAvatar(a) {
   Object.assign(avatar, a);
+  if (a.acts && a.acts.scene) $("scene").value = a.acts.scene;
   document.querySelectorAll("button.mode").forEach(b => b.classList.toggle("on", b.dataset.mode === avatar.mode));
   const h = avatar.home || {};
   $("pos").querySelectorAll("button").forEach(b => b.classList.toggle("on",
