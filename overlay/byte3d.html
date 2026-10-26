@@ -99,6 +99,9 @@ function resize() {
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   computeStage();
+  for (const p of Object.values(PROPS)) if (p.shown) placeProp(p);      // shown props follow the new frame
+  const band = xMaxAt(nav.z, settings.size) + 2.2 * settings.size;       // still on the stage, or just past the edge where roam and walk-on wait
+  nav.x = clamp(nav.x, -band, band);
   bubble.style.maxWidth = stage.wide ? Math.min(520, w * 0.4) + "px" : "90%";
   bubble.style.fontSize = stage.wide ? "22px" : "19px";
 }
