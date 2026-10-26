@@ -8,6 +8,7 @@ import collections
 import copy
 import json
 import logging
+import logging.handlers
 import os
 import random
 import re
@@ -488,11 +489,20 @@ def main():
     with open(cfg_path, "rb") as f:
         cfg = tomllib.load(f)
     fmt = logging.Formatter("%(asctime)s  %(message)s", "%H:%M:%S")
+    for stream in (sys.stdout, sys.stderr):
+        try:   # a chat name or a curly quote the console can't show becomes "?" instead of dropping the whole line
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
     console = logging.StreamHandler()
     console.setFormatter(fmt)
+    # sidekick.log is written by Python itself (UTF-8, rotated at midnight, 7 days kept), so it survives a window close
+    logfile = logging.handlers.TimedRotatingFileHandler(os.path.join(BASE, "sidekick.log"), when="midnight",
+                                                        backupCount=7, encoding="utf-8")
+    logfile.setFormatter(fmt)
     panel = ControlLogHandler()
     panel.setFormatter(fmt)
-    logging.basicConfig(level=logging.INFO, handlers=[console, panel])
+    logging.basicConfig(level=logging.INFO, handlers=[console, logfile, panel])
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
     sk = None
