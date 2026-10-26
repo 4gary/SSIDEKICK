@@ -350,19 +350,25 @@ class Features:
         self.note_arrival(user, text)
         return False
 
+    def norm_cmd(self, text, keep_case=False):
+        """What Gary matches on: the text without his name, without " ,.!?" at the ends, single spaces.
+        Lowercase unless keep_case (names and topics keep the spelling dum used)."""
+        t = re.sub(r"\s+", " ", self.sk.name_re.sub(" ", text)).strip(" ,.!?")
+        return t if keep_case else t.lower()
+
     async def on_streamer(self, text, spoken=False):
         """Handles clear-cut commands (clip, voice effects, games, recap...). Return True if handled."""
         self.last_streamer = time.monotonic()
         if spoken and not self.sk.name_re.search(text):
             return False
-        cmd = self.sk.name_re.sub(" ", text).strip(" ,.!?").lower()
-        cmd = re.sub(r"\s+", " ", cmd)
+        raw = self.norm_cmd(text, keep_case=True)
+        cmd = raw.lower()
         try:
             if await self.quiet_command(cmd):
                 return True
             if self.muted() and self.sk.name_re.search(text):
                 self.unmute()     # dum called him by name: he's back and answers
-            return await self.command(cmd)
+            return await self.command(cmd, raw)
         except Exception as e:
             log.error("Feature command failed: %s", e)
             return False
@@ -370,16 +376,19 @@ class Features:
     # ------------------------------------------------------------ hold that thought / quiet for X minutes
 
     QUIET = (r"\b(stop talking|no talking|shut up|shush|shh+|hush|zip it|pipe down|(be|keep|stay) quiet|quiet (down|please|for)|"
-             r"mute yourself|mute for|silence for|not now|take (five|ten|a break|a breather)|chill (out|for)|"
-             r"stop (it|now|right there|there)$|^(quiet|mute|silence|chill)$)")
-    AWAY = r"\b(go away|get lost|scram|beat it|take a hike|go (take a nap|chill|play|do something|have fun|hang out))\b"
-    HUSH = r"\b(hold (that|the|your|on|up)|hang on|one sec(ond)?|wait|that'?s enough|cut it|^stop$)\b|" + QUIET
+             r"mute yourself|mute for|silence for|not now|take (five|ten)|^(quiet|mute|silence)$)")
+    AWAY = r"\b(go away|get lost|scram|beat it|take a hike|go (take a nap|chill))\b"
+    HUSH = r"\b(hold (that|the|your|on|up)|hang on|one sec(ond)?|wait|that'?s enough|cut it|^stop( it| now| right there)?$)\b|" + QUIET
+    NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                 "ten": 10}
+    RACE_NOT_NAME = {"i", "we", "you", "who", "nobody", "it", "he", "she", "they", "that", "this", "what", "which",
+                     "game", "there", "one", "someone", "everyone"}
 
     def is_hush(self, text):
         """True for '<name>, hold that thought' and the like (checked even while Gary is talking)."""
         if not self.sk.name_re.search(text):
             return False
-        c = self.sk.name_re.sub(" ", text).lower()
+        c = self.norm_cmd(text)
         return bool(re.search(self.HUSH, c) or re.search(r"\b(talk again|come back|unmute|you'?re back)\b", c))
 
     def muted(self):
@@ -495,7 +504,9 @@ class Features:
         elif self.away and now >= self.away["next"] and not self.sk.busy:
             await self.go_away()            # next idle activity while he's on break
 
-    async def command(self, c):
+    async def command(self, c, raw=None):
+        """c is the lowercase command; raw is the same text with its original case (for names and topics)."""
+        raw = c if raw is None else raw
         start = r"\b(start|do|run|make|host|open|let'?s (do|have|play)|time for|new|another|quick)\b"
         if await self.move_command(c):
             return True
@@ -524,18 +535,19 @@ class Features:
                 rest = re.split(r"\bpoll\b[:,]?\s*", c, maxsplit=1)[-1]
                 await self.start_poll_from_words(re.sub(r"^(about|on|for|asking)\s+", "", rest).strip())
                 return True
-        if re.search(r"\btrivia\b", c) and (re.search(start, c) or re.search(r"\btrivia (time|round|night)\b|\b(end|stop|cancel|enough)\b", c)):
+        if re.search(r"\btrivia\b", c) and (re.search(r"\b(start|run|host|do|begin|new|another)\b.{0,12}\btrivia\b|"
+                                                  r"\btrivia (time|about|questions about)\b|\b(end|stop|cancel|enough)\b", c)):
             if re.search(r"\b(end|stop|cancel|enough)\b", c):
                 self.trivia = None
                 await self.broadcast()
                 self.say("Trivia's over, put your pencils down.")
                 return True
-            topic = re.search(r"\btrivia (?:about|on|questions about) (.+)", c)
-            rounds = re.search(r"\b(\d+|three|four|five|ten) (?:rounds|questions)\b", c)
-            n = {"three": 3, "four": 4, "five": 5, "ten": 10}.get(rounds[1], 0) if rounds else 0
-            if rounds and not n:
-                n = int(rounds[1])
-            await self.start_trivia(topic[1] if topic else "", n or None)
+            nums = "|".join(self.NUM_WORDS) + r"|\d+"
+            rounds = re.search(rf"\b({nums}) (?:rounds?|questions?)\b", c)
+            n = (int(rounds[1]) if rounds[1].isdigit() else self.NUM_WORDS[rounds[1]]) if rounds else 0
+            body = re.sub(rf",?\s*\b(?:for\s+)?(?:{nums}) (?:rounds?|questions?)\b", "", raw, flags=re.I)
+            topic = re.search(r"\btrivia (?:about|on|questions about) (.+)", body, re.I)
+            await self.start_trivia(topic[1].strip() if topic else "", n or None)
             return True
         if re.search(r"\bpredictions?\b", c):
             if re.search(r"\bcancel\b", c) and self.predict:
@@ -552,22 +564,30 @@ class Features:
                 return True
         if self.predict and not self.predict.get("race") and self.predict.get("options") \
                 and re.search(r"\b(won|wins|win|winner|answer|result|correct|it was|it's|it is)\b", c):
-            hits = [i for i, o in enumerate(self.predict["options"]) if re.search(rf"\b{re.escape(o.lower())}\b", c)]
+            opts = self.predict["options"]
             num = re.search(r"\b(?:option|number) (\d)\b", c)
-            if num and 1 <= int(num[1]) <= len(self.predict["options"]):
-                hits = [int(num[1]) - 1]
-            if len(hits) == 1:
-                await self.resolve_predict(self.predict["options"][hits[0]])
+            # the whole answer must be one option: "the answer is yes", "blue won", "option 2 won"
+            said = re.search(r"\b(?:answer|winner|result) (?:is|was) (.+)$", c) or \
+                re.search(r"^(?:it was |it's |it is )?(.+?) (?:won|wins|is correct|was right)$", c)
+            said = re.sub(r"^the ", "", said[1]).strip() if said else ""
+            hit = None
+            if num and 1 <= int(num[1]) <= len(opts):
+                hit = opts[int(num[1]) - 1]
+            elif said:
+                hit = next((o for o in opts if _norm(o) == _norm(said)), None)
+            if hit is not None:
+                await self.resolve_predict(hit)
                 return True
-        if not self.race and (re.search(r"\b(race|marbles?)\b.*\b(starting|begins|beginning|is on|go time|here we go)\b", c)
-                              or re.search(r"\bstart(ing)? (the|a) (marble )?race\b", c)):
+        if not self.race and (re.search(r"\b(race|marbles?)\b.*\b(starting|begins|beginning|is on|go time|here we go)\b(?! soon)", c)
+                              or re.search(r"\bstart(ing)? (the|a) (marble )?race\b(?! soon)", c)):
             await self.race_start()
             return True
         if self.race:
             m = re.search(r"\b(?:winner is|won by) @?([\w\-]+(?: [\w\-]+)?)", c) or \
                 re.search(r"@?([\w\-]+) (?:won|wins)\b", c)
-            if m and m[1] not in ("i", "we", "you", "who", "nobody", "it", "he", "she", "they"):
-                await self.race_end(m[1])
+            if m and m[1].split()[0] not in self.RACE_NOT_NAME:
+                name = raw[m.start(1):m.end(1)] if len(raw) == len(c) else m[1]
+                await self.race_end(name)
                 return True
             if re.search(r"\brace is (over|done|finished)\b", c):
                 await self.race_end(None)
@@ -579,7 +599,7 @@ class Features:
             self.announce_leaderboard()
             return True
         if re.search(r"\b(look at (this|that|the screen|my screen)|what do you see|you seeing this|"
-                     r"check (this|that) out|see (this|that)|watch this)\b", c):
+                     r"check (this|that) out|watch this|see this on screen)\b", c):
             return await self.glance_now()
         return False
 
@@ -651,7 +671,7 @@ class Features:
                 "race": bool(self.race), "role": self.role[0] if self.role else None,
                 "obs": bool(self.obs and self.obs.connected), "scene": self.scene,
                 "vision": self.cfg["vision"].get("enabled") and self.vision_ok,
-                "voice_effects": self.actions_with(*self.cfg["voice_effects"]["keywords"])}
+                "voice_effects": self.effect_actions()}
 
     def routes(self, app):
         page = os.path.join(BASE, "overlay", "games.html")
@@ -780,7 +800,8 @@ class Features:
         av = self.sk.avatar
         home = dict(av.get("home") or {"x": 0.72, "z": 0})
         change = {}
-        if re.search(r"\b(stay (put|there|here|still|in place|at|on|down|right|left|in the)|hold still|don'?t move|"
+        if re.search(r"\b(stay (put|still|stationary|in place)|stay (at|on|in) the (bottom|top|left|right|middle|centre|"
+                     r"center|back|front)|hold still|don'?t move|"
                      r"stop (moving|walking|roaming|wandering)|park (it|yourself)|sit still|stand still|stationary)\b", c):
             change["mode"] = "stay"
         elif re.search(r"\b(free ?roam|roam( around)?|go (roam|explore)|walk around (the|wherever)|move around freely)\b", c):
@@ -854,7 +875,8 @@ class Features:
         return True
 
     def effect_actions(self):
-        return self.actions_with(*self.cfg["voice_effects"]["keywords"])
+        """Voice-effect actions: the keyword is in the name and the name says "voice" ("Robot Dance Clip" is not one)."""
+        return [a for a in self.actions_with(*self.cfg["voice_effects"]["keywords"]) if "voice" in a.lower()]
 
     def effect_on(self, name, whose_idea):
         """Puts the effect in the conversation, so Gary knows it's on the streamer's voice (not his) and for how long."""
@@ -1359,7 +1381,8 @@ class Features:
     # ------------------------------------------------------------ clips and recaps
 
     async def clip(self):
-        acts = self.actions_with(self.cfg["clips"].get("keyword", "clip"))
+        kw = self.cfg["clips"].get("keyword", "clip")
+        acts = [a for a in self.actions_with(kw) if re.search(rf"\b{re.escape(kw)}\b", a, re.I)]
         ok = await self.run_action(acts[0], self.streamer) if acts else False
         moment = " / ".join(list(self.sk.transcript)[-4:])
         self.log_event(f"CLIP: {moment[:300]}")
