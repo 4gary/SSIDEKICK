@@ -2,17 +2,19 @@
 // Layout along x (about 2.4 wide, x -1.3..1.15):
 //   two-tier dumbbell rack at x -1.0 (3 colour pairs; the top pair is coral, L = Gary's left = +x),
 //   pink yoga mat in the middle (1.4 along x, 0.7 along z),
-//   red punching bag at x 0.98 on an L-shaped stand. The post stands behind the bag (z -0.45), the arm reaches
-//   forward to the hook at (0.98, 1.42, 0). The bag hangs from the hook: bottom 0.45, top 1.25, centre z 0.
+//   red punching bag at x 1.2 on an L-shaped stand. The post stands behind the bag (z -0.45), the arm reaches
+//   forward to the hook at (1.2, 1.42, 0). The bag hangs from the hook: bottom 0.34, top 1.14, centre z 0.
 // spots: use = mat centre facing the camera; rack = behind the rack facing the camera (the rack sits between Gary
-//   and the viewer so the dumbbells stay visible); bag = just left of the bag (x 0.53, 0.45 off the bag axis) facing +x.
+//   and the viewer so the dumbbells stay visible); bag = just left of the bag (x 0.58, 0.62 off the bag axis) facing +x.
 // anchors: bagHit = the bag surface Gary punches (front-left, y 0.9; moves with the swing);
 //   dumbbellL / dumbbellR = centres of the top pair (L at x -0.82, R at x -1.18).
 // st: active (gentle idle sway of the bag), punch (count; each increase kicks the bag away from Gary),
-//   takeL / takeR (hide the top dumbbell on that side), sweat (unused).
+//   takeL / takeR (hide the top dumbbell on that side).
 // Written each frame on the returned object: bagSwing (rad, + = away from Gary), bagBonk (true for the one frame
 //   the bag swings back past rest into Gary fast).
-// Also exports buildDumbbell (hand-held, coral, grip at origin, bar along x) and buildSweat (teal-white drop, tip +y).
+// Also exports buildDumbbell (hand-held, coral, grip at origin, bar along x).
+
+import { clamp, disposeTree, rbox } from './common.js';
 
 const CORAL = 0xff6b4a, MINT = 0x4fd1a5, YELLOW = 0xffd23f;
 const DB_R = 0.085;   // dumbbell disc radius
@@ -54,57 +56,15 @@ export function buildDumbbell(THREE, ctx) {
   };
 }
 
-// Single cartoon sweat drop: teal-white glossy teardrop, tip up (+y), about 0.06 tall, origin at the middle of the bulb-to-tip span.
-export function buildSweat(THREE, ctx) {
-  const root = new THREE.Group();
-  const dropMat = new THREE.MeshStandardMaterial({
-    color: 0xbff8ef, roughness: 0.12, metalness: 0, emissive: 0x1d7f76, emissiveIntensity: 0.25,
-  });
-  const shineMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.8, roughness: 0.2 });
-  const coneGeo = new THREE.ConeGeometry(0.02, 0.042, 20);   // base at y -0.018 (equator of the bulb), apex at y +0.024
-  ctx.mesh(ctx.sphere, dropMat, root, [0, -0.018, 0], [0.02, 0.02, 0.02]);   // round bulb, bottom at y -0.038
-  ctx.mesh(coneGeo, dropMat, root, [0, 0.003, 0]);
-  ctx.mesh(ctx.sphere, shineMat, root, [-0.006, -0.014, 0.017], [0.005, 0.005, 0.005]); // glint
-  return {
-    root,
-    dispose() {
-      coneGeo.dispose();
-      dropMat.dispose(); shineMat.dispose();
-    },
-  };
-}
-
 export function build(THREE, ctx) {
   const { mesh, group, canvasTex } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-
-  // Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r).
-  // Normals are set analytically so edges shade smoothly. bottomOrigin moves the origin to the bottom face.
-  function rbox(w, h, d, r, seg = 12, bottomOrigin = false) {
-    const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-    const hx = w / 2, hy = h / 2, hz = d / 2;
-    const rr = Math.min(r, hx, hy, hz);
-    const ax = hx - rr, ay = hy - rr, az = hz - rr;
-    const P = g.attributes.position, N = g.attributes.normal;
-    const n = new THREE.Vector3();
-    for (let i = 0; i < P.count; i++) {
-      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-      const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-      n.set(x - qx, y - qy, z - qz).normalize(); // surface vertices always have a non-zero offset
-      P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-      N.setXYZ(i, n.x, n.y, n.z);
-    }
-    P.needsUpdate = true; N.needsUpdate = true;
-    if (bottomOrigin) g.translate(0, hy, 0);
-    return g;
-  }
 
   // ---------- layout ----------
   const RX = -1.0;          // rack centre x
-  const BX = 0.98;          // bag axis x
+  const BX = 1.2;           // bag axis x
   const POST_Z = -0.45;     // bag stand post, behind the bag
   const HOOK_Y = 1.42;      // hook the bag hangs from
-  const BAG_L = 0.57;       // pendulum length, hook to bag centre
+  const BAG_L = 0.68;       // pendulum length, hook to bag centre
   const BAG_R = 0.15;       // bag radius (capsule, total length 0.8)
   const SH_LO = 0.30, SH_HI = 0.66;          // shelf top surfaces
   const DB_Y = [SH_LO + DB_R, SH_HI + DB_R]; // dumbbell centres resting on each shelf
@@ -141,14 +101,15 @@ export function build(THREE, ctx) {
   const root = new THREE.Group();
 
   // ---------- yoga mat (1.4 along x, 0.7 along z) ----------
-  mesh(rbox(1.4, 0.014, 0.7, 0.006), matMat, root, [0, 0.009, 0]);
+  mesh(rbox(THREE, 1.4, 0.014, 0.7, 0.006), matMat, root, [0, 0.009, 0]);
 
   // ---------- dumbbell rack: base, two uprights, two shelves ----------
   const rack = group(root, [RX, 0, 0]);
-  mesh(rbox(0.6, 0.04, 0.5, 0.015), frameMat, rack, [0, 0.02, 0]);
-  for (const s of [-1, 1]) mesh(rbox(0.035, 0.82, 0.46, 0.012), frameMat, rack, [s * 0.2825, 0.45, 0]);
-  mesh(rbox(0.6, 0.03, 0.46, 0.01), shelfMat, rack, [0, SH_LO - 0.015, 0]);
-  mesh(rbox(0.6, 0.03, 0.46, 0.01), shelfMat, rack, [0, SH_HI - 0.015, 0]);
+  mesh(rbox(THREE, 0.6, 0.04, 0.5, 0.015), frameMat, rack, [0, 0.02, 0]);
+  // uprights inset 2 mm so their outer faces are not coplanar with the base and shelves (x +-0.3)
+  for (const s of [-1, 1]) mesh(rbox(THREE, 0.035, 0.82, 0.46, 0.012), frameMat, rack, [s * 0.2805, 0.45, 0]);
+  mesh(rbox(THREE, 0.6, 0.03, 0.46, 0.01), shelfMat, rack, [0, SH_LO - 0.015, 0]);
+  mesh(rbox(THREE, 0.6, 0.03, 0.46, 0.01), shelfMat, rack, [0, SH_HI - 0.015, 0]);
 
   // Dumbbells stand on their discs with the bar along z, so the discs face the camera.
   // Top shelf: coral pair on the outside (L and R), mint in the middle. Bottom shelf: yellow pair outside, mint middle.
@@ -168,15 +129,15 @@ export function build(THREE, ctx) {
   rackDumbbell(-SLOT, DB_Y[0], yellowMat);
 
   // ---------- punching bag on an L-shaped stand ----------
-  mesh(rbox(0.34, 0.04, 0.3, 0.015), frameMat, root, [BX, 0.02, POST_Z]);            // base plate
-  mesh(rbox(0.06, 1.44, 0.06, 0.02), frameMat, root, [BX, 0.72, POST_Z]);           // post, 0 .. 1.44
+  mesh(rbox(THREE, 0.34, 0.04, 0.3, 0.015), frameMat, root, [BX, 0.02, POST_Z]);            // base plate
+  mesh(rbox(THREE, 0.06, 1.44, 0.06, 0.02), frameMat, root, [BX, 0.72, POST_Z]);           // post, 0 .. 1.44
   const armGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.45, 12); armGeo.rotateX(Math.PI / 2);
   mesh(armGeo, frameMat, root, [BX, 1.44, POST_Z / 2]);                              // arm, post to hook (along z)
   mesh(ctx.sphere, silverMat, root, [BX, HOOK_Y, 0], [0.025, 0.025, 0.025]);         // hook
 
   // Pendulum: origin at the hook, rotation.z = swing (+ = bottom moves to +x, away from Gary)
   const pend = group(root, [BX, HOOK_Y, 0]);
-  mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.17, 6), silverMat, pend, [0, -0.085, 0]); // chain
+  mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 6), silverMat, pend, [0, -0.15, 0]); // chain
   mesh(new THREE.CapsuleGeometry(BAG_R, 0.5, 8, 24), bagMat, pend, [0, -BAG_L, 0]);       // bag, 0.8 long
 
   // ---------- anchors ----------
@@ -207,7 +168,7 @@ export function build(THREE, ctx) {
     spots: {
       use: { x: 0, y: 0, z: 0, yaw: 0, pose: 'stand' },
       rack: { x: RX, y: 0, z: -0.62, yaw: 0, pose: 'stand' },
-      bag: { x: BX - 0.45, y: 0, z: 0, yaw: Math.PI / 2, pose: 'stand' },
+      bag: { x: BX - 0.62, y: 0, z: 0, yaw: Math.PI / 2, pose: 'stand' },
     },
     anchors,
     bagSwing: 0,
@@ -247,7 +208,7 @@ export function build(THREE, ctx) {
       topR.visible = !st.takeR;
     },
     dispose() {
-      root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      disposeTree(root, ctx.sphere);   // ctx.sphere is shared
       dbGeo.bar.dispose(); dbGeo.disc.dispose(); dbGeo.cap.dispose();
       for (const m of mats) m.dispose();
       matTex.dispose(); bagTex.dispose();
