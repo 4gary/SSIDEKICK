@@ -780,7 +780,9 @@ document.addEventListener("click", () => { audioCtx(); $("unlock").style.display
 function showBubble(text) { clearTimeout(hideTimer); bubble.textContent = text; bubble.classList.add("show"); }
 function hideBubble(delay = 1500) { clearTimeout(hideTimer); hideTimer = setTimeout(() => bubble.classList.remove("show"), delay); }
 function setThinking(on) { if (on && !thinking) onThinkStart(); thinking = on; }
+let sayTimer = null, sayGen = 0;                  // a timer for text-only lines, and a counter so a stale line can't act after a newer one started
 function stopAudio() {
+  clearTimeout(sayTimer); sayTimer = null;
   if (source) { try { source.onended = null; source.stop(); } catch (e) {} source = null; }
   if (talking) onTalkEnd();
   talking = false;
@@ -791,17 +793,20 @@ function finished() {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "done" }));
 }
 async function say(msg) {
+  const my = ++sayGen;
   setThinking(false);
   stopAudio();
   showBubble(msg.text);
   onTalkStart();
   talkBL = pickBodyLang(msg.text);
-  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; setTimeout(finished, (msg.seconds || 3) * 1000); return; }
+  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000); return; }
   try {
     const c = audioCtx();
     if (c.state === "suspended") $("unlock").style.display = "block";
     const buf = await (await fetch(msg.audio)).arrayBuffer();
+    if (my !== sayGen) return;                     // a newer line started while this one was fetching
     const audio = await c.decodeAudioData(buf);
+    if (my !== sayGen) return;
     source = c.createBufferSource();
     source.buffer = audio;
     source.connect(analyser);
@@ -810,13 +815,13 @@ async function say(msg) {
     source.start();
   } catch (e) {
     console.error(e);
-    setTimeout(finished, (msg.seconds || 3) * 1000);
+    if (my === sayGen) sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000);
   }
 }
 
 // avatar settings (mode, home spot, size) come from the control page through the app, or from the URL
 const PROPS = {};   // filled in by the prop loader below; declared up here because applySettings can run at module start (?size=)
-const nav ={ x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, hiddenUntil: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
+const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
 const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1 };
 function applySettings(set = {}) {
   if (set.mode && ["stay", "wander", "roam", "walkon"].includes(set.mode)) { settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true; }
@@ -872,8 +877,10 @@ function connect() {
   ws = sock;
   ws.onopen = () => { wsDelay = 1000; ws.send(JSON.stringify({ type: "hello", role: "overlay" })); };
   ws.onmessage = ev => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "config") { if (msg.name) botName = msg.name; if (msg.avatar) applySettings(msg.avatar); }
+    audioCtx();                                 // first message: set up the audio context now (audioCtx resumes it if suspended)
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { console.error("bad frame from app", e); return; }
+    if (msg.type === "config") { if (msg.name) botName = msg.name; }
     else if (msg.type === "avatar") applySettings(msg.set || msg);
     else if (msg.type === "thinking") setThinking(true);
     else if (msg.type === "say") say(msg);
@@ -1684,13 +1691,14 @@ function tone(type, f0, f1, dur, vol = 0.3, delay = 0, vib = 0) {
   g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g); g.connect(sfxBus); o.start(t0); o.stop(t0 + dur + 0.05);
 }
+let noiseBuf = null;                                // one 2 s white-noise buffer, reused by every noise() (each play is cut to its own length)
 function noise(dur, vol = 0.3, delay = 0, freq = 1000, ftype = "bandpass") {
-  const c = sfxOut(), t0 = c.currentTime + delay, n = Math.ceil(c.sampleRate * dur), b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const c = sfxOut(), t0 = c.currentTime + delay;
+  if (!noiseBuf) { noiseBuf = c.createBuffer(1, Math.ceil(c.sampleRate * 2), c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
   const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
-  s.buffer = b; f.type = ftype; f.frequency.value = freq;
+  s.buffer = noiseBuf; f.type = ftype; f.frequency.value = freq;
   g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0);
+  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0, 0, dur);
 }
 const SFX = {
   pop: () => tone("sine", 500, 1100, 0.12, 0.3),
