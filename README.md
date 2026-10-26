@@ -1,6 +1,6 @@
 # Stream Sidekick
 
-A fully local AI co-host for OBS. It reads your chat, chats back out loud, asks questions when things get quiet, reacts to follows and raids, and runs Streamer.bot actions when you tell it to. It shows up as a little talking robot (or your own PNGtuber images) in a corner of your stream.
+A fully local AI co-host for OBS. It reads your chat, chats back out loud, asks questions when things get quiet, reacts to follows and raids, and runs Streamer.bot actions when you tell it to. It shows up as a 3D Gary, a talking avatar, in a corner of your stream.
 
 ```
  Chat (Twitch/YouTube/Kick)          You (control page or mic)
@@ -9,7 +9,7 @@ A fully local AI co-host for OBS. It reads your chat, chats back out loud, asks 
         |  chat events                      |
         +---------------------------------->+-->  local TTS (Windows voice or Piper)
                                             |
-                                  OBS Browser Source (avatar + voice)
+                                  OBS Browser Source (3D Gary + voice)
 ```
 
 Nothing goes to the cloud. Chat goes through Streamer.bot, the thinking happens in LM Studio, and the voice is made on your PC.
@@ -48,8 +48,8 @@ Nothing goes to the cloud. Chat goes through Streamer.bot, the thinking happens 
 
 ## 4. OBS
 
-1. Add a **Browser Source**. Tick **Local file** and pick `overlay\loader.html` in Gary's folder (it waits until Gary is running, then shows him). Width `400`, height `400`.
-   Or, instead of a local file, use the URL `http://localhost:7777/static/byte3d.html`.
+1. Add a **Browser Source**. Tick **Local file** and pick `overlay\loader.html` in Gary's folder (it waits until Gary is running, then shows him). Width `400`, height `400` is a good start.
+   Gary's size on screen is a 3D setting (set it on the control page), not the source size. Or, instead of a local file, use the URL `http://localhost:7777/static/byte3d.html`.
 2. Tick **Control audio via OBS**. The voice now shows up as its own audio source in the mixer, so it goes to stream and you can set its volume.
    Right-click it in the mixer → *Advanced Audio Properties* → set Audio Monitoring to *Monitor and Output* so you hear it too.
 3. Drag it into a corner.
@@ -57,16 +57,16 @@ Nothing goes to the cloud. Chat goes through Streamer.bot, the thinking happens 
 ## 5. Use it
 
 - Open **http://localhost:7777/control** in your browser. You can see what it's doing, pause it, skip a line, talk to it, and fake chat messages for testing.
-- In chat, viewers get a reply when they say its name ("byte you're so dumb lol") or use `!ask <question>`.
+- In chat, viewers get a reply when they say its name ("gary you're so dumb lol") or use `!ask <question>`.
 - Otherwise it jumps into the conversation now and then on its own (`reply_chance`, `chat_cooldown_seconds`) and asks something when chat goes quiet (`idle_seconds`).
-- **Commands:** type in the control page "Byte, switch to the gameplay scene" or "play the airhorn". It picks the matching Streamer.bot action, runs it, and says something about it.
+- **Commands:** type in the control page "Gary, switch to the gameplay scene" or "play the airhorn". It picks the matching Streamer.bot action, runs it, and says something about it.
 
 ### Talk to it with your voice (optional)
 
 ```
 .venv\Scripts\pip install faster-whisper sounddevice
 ```
-Then in `config.toml` set `[listen] enabled = true`. Say its name to talk to it ("Byte, what do you think of this boss?", "Byte, switch to gameplay"). Everything else you say is used as context so it knows what's going on. It stops listening while it's talking.
+Then in `config.toml` set `[listen] enabled = true`. Say its name to talk to it ("Gary, what do you think of this boss?", "Gary, switch to gameplay"). Everything else you say is used as context so it knows what's going on. It stops listening while it's talking.
 If it keeps hearing its own voice, use headphones or set OBS monitoring to *Monitor Off*. If it misses its name, add the misspellings you see in the log to `aliases`.
 
 ## Better voice: Piper (free, local, sounds far more natural)
@@ -91,11 +91,7 @@ If it keeps hearing its own voice, use headphones or set OBS monitoring to *Moni
    engine = "elevenlabs"
    elevenlabs_voice = "the voice's name"
    ```
-If ElevenLabs is down or out of credits, Byte falls back to the Windows voice for that line.
-
-## Use your own avatar (PNGtuber style)
-
-Put two images in `overlay\avatar\`: `closed.png` (mouth closed) and `open.png` (mouth open), with the same size and transparent backgrounds. Restart, and the overlay uses them instead of the robot.
+If ElevenLabs is down or out of credits, Gary falls back to the Windows voice for that line.
 
 ## Memory
 
