@@ -1111,9 +1111,9 @@ const PROP_SLOTS = {
   djdeck: { fx: -0.78, fz: 0.15, yaw: 0.22, half: 0.75 },
   couch:  { fx: 0.80,  fz: 0.10, yaw: -0.22, half: 1.0 },
   bed:    { fx: -0.74, fz: 0.02, yaw: 0.12, half: 1.55 },
-  arcade: { fx: 0.9,   fz: 0.25, yaw: -1.25, half: 0.5 },
+  arcade: { fx: 0.55,  fz: 0.25, yaw: -0.75, half: 0.5 },
   desk:   { fx: 0.8,   fz: 0.35, yaw: -0.25, half: 0.85 },
-  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.25 },
+  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.45 },
   fridge: { fx: -0.9,  fz: 0.3,  yaw: 0.55, half: 0.45 },
   plant:  { fx: 0.55,  fz: 0.55, yaw: -0.2, half: 0.3 },
   easel:  { fx: -0.55, fz: 0.4,  yaw: 0.3,  half: 0.6 },
@@ -1142,6 +1142,22 @@ function placeProp(p) {
   p.inst.root.rotation.y = s.yaw;
   p.inst.root.scale.setScalar(size);
   p.inst.root.updateMatrixWorld(true);
+  p.foot = new THREE.Box3().setFromObject(p.inst.root).expandByScalar(0.3);   // footprint for the walk (cached until the prop is placed again)
+}
+// walks avoid shown props: random targets and walk midpoints are re-drawn when they land inside a footprint
+function propBlocked(x, z) {
+  for (const p of Object.values(PROPS)) { const f = p.foot; if (p.shown && f && x > f.min.x && x < f.max.x && z > f.min.z && z < f.max.z) return true; }
+  return false;
+}
+const walkBlocked = (x, z) => propBlocked(x, z) || propBlocked((x + nav.x) / 2, (z + nav.z) / 2);
+function freeTarget(gen) {                     // up to 8 draws from gen; keeps the old target when none is clear
+  for (let i = 0; i < 8; i++) { const [x, z] = gen(); if (!walkBlocked(x, z)) return [x, z]; }
+  return [nav.tx, nav.tz];
+}
+function freeX(x, z, xm) {                     // a job's stage spot at depth z: the same x if clear, else up to 8 other x in the stage; keeps x when none is clear
+  if (!walkBlocked(x, z)) return x;
+  for (let i = 0; i < 8; i++) { const cx = rand(-xm, xm); if (!walkBlocked(cx, z)) return cx; }
+  return x;
 }
 const propPt = (p, x, y, z) => p.inst.root.localToWorld(new THREE.Vector3(x, y, z));
 function poof(pos, n = 14, r = 0.9, color = null) {
@@ -1211,20 +1227,21 @@ function startJob(name, force = false) {
     const p = job.p;
     if (!p.shown) placeProp(p);
     const u = p.inst.spots.use;
+    job.spot = u;
     if (name === "dj") {                                       // round the side of the table to get behind it
       const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || 1);
       job.path = [propPt(p, side * 1.05, 0, 0.6), propPt(p, side * 1.05, 0, u.z), propPt(p, u.x, 0, u.z)];
-    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];
+    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];   // job.spot (set above) gives him the cabinet's facing: spotYaw
     else if (name === "couch") job.path = [propPt(p, u.x, 0, u.z + 0.75)];
-    else if (name === "nap") job.path = [propPt(p, -0.35, 0, 1.0)];
+    else if (name === "nap") job.path = [propPt(p, u.x, 0, u.z + 0.9)];   // walk to the foot end first, so the lie-down starts where he stands
     else if (name === "desk" || name === "desknap") { const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || -1); job.path = [propPt(p, side * 1.1, 0, 0.6), propPt(p, side * 1.1, 0, u.z - 0.1), propPt(p, u.x, 0, u.z - 0.1)]; }   // round the side of the desk to the chair
   } else if (name === "stare") {
     const z = stage.zNear;
-    job.path = [new THREE.Vector3(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), z, xMaxAt(z, size) * 0.6), 0, z)];
   } else if (name === "butterfly") { job.path = []; job.phase = "do"; job.t0 = S.t; job.until = S.t + 15; job.at = { x: nav.x, z: nav.z }; bfStart(); return true;
   } else if (name === "lieback") {                               // lie along the bottom edge of the screen; further back he'd look like he floats in mid-air (the overlay has no visible floor)
     const z = lerp(stage.zNear, stage.zFar, 0.12), xm = Math.max(0, xMaxAt(z, size) - 1.8 * size);
-    job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)];
   } else job.path = [new THREE.Vector3(nav.x, 0, nav.z)];
   if (name === "lieback") job.dir = job.path[0].x > 0 ? -1 : 1;            // head toward the middle of the screen
   return true;
@@ -1578,7 +1595,7 @@ function poseJob(t, dt) {
     p.st = { active: k > 0.5 && !asleep, typing, asleep };
   } else if (name === "arcade") {
     const p = job.p, A = p.inst.anchors;
-    J.yaw = p.slot.yaw + Math.PI;
+    J.yaw = p.slot.yaw + ((job.spot && job.spot.yaw) || 0);     // the cabinet spot's facing (profile, so the screen shows)
     if (t > job.nextSub) { job.sub = Math.random() < 0.2 ? 1 + Math.floor(Math.random() * 2) : 0; job.nextSub = t + (job.sub ? 1.6 : rand(4, 9)); }
     const stick = { x: Math.sin(t * 5.3) * Math.sin(t * 1.3), y: Math.sin(t * 3.7) * 0.6 };
     const press = [Math.sin(t * 17) > 0.3, Math.sin(t * 11 + 1) > 0.6, Math.sin(t * 7 + 2) > 0.7];
@@ -1922,9 +1939,9 @@ function startJob3(name, size) {
     job.spot = s;
     job.path = [propPt(p, s.x, 0, s.z + 0.4), propPt(p, s.x, 0, s.z)];
   } else if (job.def.event) eventStart(name, pendingInfo, size);
-  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)]; }
+  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)]; }
   else if (name === "goodbye") job.path = [new THREE.Vector3(0, 0, lerp(stage.zFar, stage.zNear, 0.7))];
-  else if (name === "sign") job.path = [new THREE.Vector3(clamp(nav.x, -1.5 * size, 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
+  else if (name === "sign") job.path = [new THREE.Vector3(freeX(clamp(nav.x, -1.5 * size, 1.5 * size), lerp(stage.zFar, stage.zNear, 0.6), 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
   else if (name === "chatfloor") job.path = [new THREE.Vector3(clamp(nav.x, -1.5, 1.5), 0, stage.zNear)];
   if (name === "read") { job.kind = Math.random() < 0.5 ? "paper" : "book"; job.seated = job.kind === "book" && Math.random() < 0.6; }
   if (name === "snack") job.food = Math.random() < 0.5 ? "pizza" : "chips";
@@ -2442,7 +2459,7 @@ function update(dt) {
     speed = 0.5 * size;
     if (want) { nav.tx = clamp(nav.x, homeX - 0.5, homeX + 0.5); nav.tz = clamp(nav.z, homeZ - 0.4, homeZ + 0.4); }
     else if (t > nav.nextDecision) {
-      nav.tx = clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm); nav.tz = clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear);
+      [nav.tx, nav.tz] = freeTarget(() => [clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm), clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear)]);
       nav.nextDecision = t + rand(4, 10);
     }
   } else if (mode === "roam") {
@@ -2459,12 +2476,8 @@ function update(dt) {
         nav.x = side * (xMaxAt(nav.z, size) + 2.2 * size);
         nav.tx = side * rand(0.2, 0.8) * Math.max(0, xMaxAt(nav.z, size) - margin); nav.tz = nav.z;
         nav.nextDecision = t + rand(4, 9);
-      } else if (false) {                                            // (wandering off screen is off: g doesn't want him leaving the screen)
-        nav.tx = Math.sign(nav.x || 1) * (xMaxAt(nav.z, size) + 2.2 * size); nav.tz = nav.z;
-        nav.nextDecision = t + rand(8, 16);
       } else {
-        nav.tz = rand(stage.zFar, stage.zNear);
-        nav.tx = rand(-1, 1) * Math.max(0, xMaxAt(nav.tz, size) - margin);
+        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear); return [rand(-1, 1) * Math.max(0, xMaxAt(z, size) - margin), z]; });
         nav.nextDecision = t + rand(3, 9);
       }
     }
