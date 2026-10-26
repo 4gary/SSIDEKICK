@@ -106,7 +106,8 @@ export function buildBook(THREE, ctx) {
 
   // Board slab (the cover art is on its +z face), spine, and the two page blocks (-z face = pages)
   mesh(K.geo(rbox(THREE, 0.56, 0.36, 0.012, 0.008)), [boardMat, boardMat, boardMat, boardMat, coverMat, boardMat], root, [0, 0.18, 0.006]);
-  mesh(K.geo(rbox(THREE, 0.03, 0.36, 0.057, 0.012)), boardMat, root, [0, 0.18, -0.0165]);
+  // spine: front face at z 0.01, 2 mm behind the cover (the board's front is at 0.012), so they do not z-fight
+  mesh(K.geo(rbox(THREE, 0.03, 0.36, 0.045, 0.012)), boardMat, root, [0, 0.18, -0.0125]);
   const blockGeo = K.geo(rbox(THREE, 0.25, 0.32, 0.045, 0.006));
   for (const s of [-1, 1]) mesh(blockGeo, [edgeMat, edgeMat, edgeMat, edgeMat, edgeMat, pageMat], root, [s * 0.155, 0.18, -0.0225]);
 
@@ -439,14 +440,15 @@ export function buildWatch(THREE, ctx) {
 
   // hands: each pivots at the dial centre
   const hands = [];
-  const addHand = (len, w, mat, speed, offset) => {
-    const hg = group(root, [0, 0, 0.104]);
+  // hands are stacked 2 mm apart in z so their front faces never coincide where they cross
+  const addHand = (len, w, mat, speed, offset, dz) => {
+    const hg = group(root, [0, 0, 0.104 + dz]);
     mesh(K.geo(new THREE.BoxGeometry(w, len, 0.003).translate(0, len / 2, 0)), mat, hg);
     hands.push({ hg, speed, offset });
   };
-  addHand(0.032, 0.012, dark, -0.25, 1.0);  // hour
-  addHand(0.046, 0.008, dark, -1.5, 0.0);   // minute
-  addHand(0.05, 0.003, red, -6.28, 0.0);    // second
+  addHand(0.032, 0.012, dark, -0.25, 1.0, 0);       // hour
+  addHand(0.046, 0.008, dark, -1.5, 0.0, 0.002);    // minute
+  addHand(0.05, 0.003, red, -6.28, 0.0, 0.004);     // second
 
   return {
     root,
@@ -523,7 +525,7 @@ export function buildNotepad(THREE, ctx) {
   for (let i = 0; i < 9; i++) mesh(coilGeo, coilMat, root, [-0.064 + i * 0.016, 0.11, 0.01], [1, 1, 1], [0, Math.PI / 2, 0]);
 
   // flipping sheet: pivot on the spiral, hangs in front at rest
-  const sheetGeo = K.geo(new THREE.PlaneGeometry(0.15, 0.21).translate(0, -0.105, 0.02));
+  const sheetGeo = K.geo(new THREE.PlaneGeometry(0.15, 0.21).translate(0, -0.105, 0.0225));   // 2.5 mm proud of the pad face (z 0.02)
   const sheetMat = K.mat({ map: noteTex, roughness: 0.9, side: THREE.DoubleSide });
   const flip = group(root, [0, 0.11, 0]);
   flip.visible = false;

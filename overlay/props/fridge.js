@@ -116,7 +116,8 @@ export function build(THREE, ctx) {
   const back = BZ0 + 0.04;                    // inner face of the back wall
   mesh(new THREE.PlaneGeometry(0.65, YH), glowMat, root, [0, YC, back + 0.002]);   // emissive back panel
   for (const s of [-1, 1]) {
-    mesh(new THREE.PlaneGeometry(BZ1 - back, YH), linerMat, root, [s * 0.325, YC, (back + BZ1) / 2],
+    // 4 mm inside the side walls' inner faces (x +-0.325), so the planes are not coplanar with them
+    mesh(new THREE.PlaneGeometry(BZ1 - back, YH), linerMat, root, [s * 0.321, YC, (back + BZ1) / 2],
       [1, 1, 1], [0, (-s * Math.PI) / 2, 0]);
   }
   mesh(new THREE.PlaneGeometry(0.65, BZ1 - back), linerMat, root, [0, Y0 + 0.002, (back + BZ1) / 2],
