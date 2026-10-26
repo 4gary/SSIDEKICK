@@ -31,6 +31,18 @@ OVERLAY = os.path.join(BASE, "overlay")
 log = logging.getLogger("sidekick")
 
 
+@web.middleware
+async def no_cache(request, handler):
+    """OBS keeps browser sources in a cache, so an updated overlay could show old code. These pages are never cached."""
+    try:
+        resp = await handler(request)
+    except web.HTTPException as e:   # 404s and the like are responses too
+        resp = e
+    if request.path == "/" or request.path.startswith(("/static", "/control", "/dock", "/games")):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 def foreign_origin(request):
     """True when a web page from another site is calling us. Browsers say so in the Origin header; Streamer.bot,
     curl and the OBS overlay (which is served by this app) either send no Origin or send localhost."""
@@ -409,7 +421,7 @@ class Sidekick:
         self.brain = Brain(self.cfg, session)
         port = self.cfg["server"]["port"]
 
-        app = web.Application()
+        app = web.Application(middlewares=[no_cache])
         app.router.add_get("/", lambda r: web.HTTPFound("/static/byte3d.html"))   # the 3D overlay (index.html is the old 2D one)
         app.router.add_get("/control", lambda r: web.FileResponse(os.path.join(OVERLAY, "control.html")))
         app.router.add_get("/ws", self.ws_handler)
