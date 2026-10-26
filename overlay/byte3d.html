@@ -1015,7 +1015,7 @@ function bodyR(y) {
   for (let i = 1; i < BODY_R.length; i++) if (y <= BODY_R[i][1]) { const [r0, y0] = BODY_R[i - 1], [r1, y1] = BODY_R[i]; return lerp(r0, r1, (y - y0) / (y1 - y0)); }
   return 0;
 }
-const ARM_PTS = [["sh", -0.13, 0.062, 0], ["el", 0, 0.06, 0], ["el", -0.1, 0.058, 1], ["hand", -0.04, 0.068, 1]];   // last: 0 = elbow end, 1 = hand end
+const ARM_PTS = [["sh", -0.15, 0.082, 0], ["el", 0, 0.076, 0], ["el", -0.13, 0.075, 1], ["hand", -0.04, 0.068, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
 const _kp = new THREE.Vector3(), _kh = new THREE.Vector3(), _kq = new THREE.Quaternion();
 function armHit(arm, k, which) {            // deepest point of this end of the arm inside the body: {pen, p, r}
   let best = null;
@@ -1332,7 +1332,7 @@ function bfGround(size) {                                       // where he runs
 function bfUpdate(t, dt) {
   if (!bf.g.visible) return;
   const size = settings.size, k = t - bf.t0, sd = bf.seed;
-  const cap = tmp.set(0, 0.95, -0.05); capG.localToWorld(cap);
+  const cap = tmp.set(0, 0.63, -0.05); capG.localToWorld(cap);              // just above the crown button (the cap geometry sits 0.16 below capG)
   let p;
   if (bf.leave && t - bf.leave > 0) {                                    // flies away up and off
     const q = t - bf.leave; p = bf.pos.clone().add(new THREE.Vector3(Math.sin(q * 3) * 0.02 + 0.03, 0.04, 0).multiplyScalar(size * 40 * dt));
@@ -2689,7 +2689,7 @@ function update(dt) {
   }
   if (act.name === "drag") pP = blendPose(pP, reachPose(armP, headPoint(0.3, -0.72, 0.2)), Math.sin(Math.min(1, ap / 0.75) * Math.PI) ** 0.5);  // hand to the cigarette
   if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.0, 0.2 + Math.sin(t * 16) * 0.04, 0.12)), w); }   // the temple, not the crown
-  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.27, 0.22)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the brim at the side of his head
+  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.06, 0.20)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the band at the side of his head (the brim dips to head y -0.06 there)
   if (act.name === "wave") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, eulerPose(-2.1, 0, 0.9 + Math.sin(t * 14) * 0.25, -1.0), w); }
   if (act.name === "stretch") { const w = Math.sin(ap * Math.PI) ** 0.5; pN = blendPose(pN, POSE.up(-1), w); pP = blendPose(pP, POSE.up(1), w); }
   if (S.hop > 0) { const hopQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.6, 0, 0)); pN.q.premultiply(hopQ); pP.q.premultiply(hopQ); }
