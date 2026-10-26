@@ -136,7 +136,7 @@ key.shadow.camera.left = -3; key.shadow.camera.right = 3; key.shadow.camera.top 
 key.shadow.camera.near = 0.5; key.shadow.camera.far = 20;
 key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025;
 scene.add(key); scene.add(key.target);
-const rim = new THREE.DirectionalLight(0xbfe0ff, 1.5);
+const rim = new THREE.DirectionalLight(0xbfe0ff, 2.0);   // from behind (the update loop keeps it at his back-left)
 scene.add(rim); scene.add(rim.target);
 const fill = new THREE.DirectionalLight(0xffd6c0, 0.55);
 scene.add(fill); scene.add(fill.target);
@@ -653,8 +653,8 @@ function drawEye(side, i) {
   g.strokeStyle = "#2b1606"; g.lineWidth = r * 0.14; g.stroke();
   const pr = r * 0.46 * face.pupil;
   g.fillStyle = "#0d0704"; g.beginPath(); g.arc(0, 0, pr, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(-r * 0.33, -r * 0.36, r * 0.27, r * 0.22, -0.5, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(r * 0.33, -r * 0.36, r * 0.27, r * 0.22, 0.5, 0, Math.PI * 2); g.fill();   // toward the key light (upper right)
+  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(-r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
   g.fillStyle = "rgba(255,230,200,.25)"; g.beginPath(); g.arc(0, r * 0.45, r * 0.5, 0.3, Math.PI - 0.3); g.fill();
   g.restore();
   // upper lid (sleepy / skeptical) and lower lid (smile squint), drawn inside the eye
