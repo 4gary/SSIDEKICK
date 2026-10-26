@@ -2125,7 +2125,7 @@ function poseJob3(name, t, dt, k) {
     if (job.phase === "do") sweat(t, size, effort);
     p.st = { active: k > 0.5, takeL: e === 3 && on > 0.05, takeR: e === 3 && on > 0.05 };
   } else if (name === "punch") {
-    J.yaw = spotYaw;
+    J.yaw = spotYaw - 0.35;                                   // a turn toward the camera, so the bag sits beside his head rather than behind it
     const hitW = propPt(p, A.bagHit.x, A.bagHit.y, A.bagHit.z), bonked = job.bonkT && t - job.bonkT < 1.8;
     job.punches ??= 0;
     if (bonked) {
