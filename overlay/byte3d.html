@@ -19,8 +19,7 @@
 <script type="importmap">
 { "imports": {
   "three": "./lib/three/build/three.module.min.js",
-  "three/addons/": "./lib/three/examples/jsm/",
-  "@pixiv/three-vrm": "./lib/three-vrm/three-vrm.module.min.js"
+  "three/addons/": "./lib/three/examples/jsm/"
 } }
 </script>
 </head>
@@ -33,7 +32,7 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?vrm=0  ?bg=#4a7fb5  ?yaw=0.6
+// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
 const params = new URLSearchParams(location.search);
 const CAP_TEXT = params.get("cap") ?? "COCK";
 const DEMO = params.has("demo");
@@ -99,6 +98,9 @@ function resize() {
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   computeStage();
+  for (const p of Object.values(PROPS)) if (p.shown) placeProp(p);      // shown props follow the new frame
+  const band = xMaxAt(nav.z, settings.size) + 2.2 * settings.size;       // still on the stage, or just past the edge where roam and walk-on wait
+  nav.x = clamp(nav.x, -band, band);
   bubble.style.maxWidth = stage.wide ? Math.min(520, w * 0.4) + "px" : "90%";
   bubble.style.fontSize = stage.wide ? "22px" : "19px";
 }
@@ -602,17 +604,6 @@ function puff(pos, strength = 1, dir = null, color = null) {
   p.sp.material.rotation = Math.random() * 6;
 }
 
-// optional VRoid model: drop overlay/avatar/byte.vrm in and it replaces the built-in Gary
-let vrmRig = null;
-if (params.get("vrm") !== "0") {
-  fetch("avatar/byte.vrm", { method: "HEAD" }).then(async r => {
-    if (!r.ok) return;
-    const { loadVRM } = await import("./vrm-driver.js");
-    vrmRig = await loadVRM("avatar/byte.vrm", scene);
-    byte.visible = false;
-  }).catch(e => console.warn("VRM not loaded:", e));
-}
-
 // ------------------------------------------------------------ face drawing
 const face = {   // current (smoothed) face state
   squash: [1, 1], lid: [0, 0], lower: [0, 0], wide: 0, gx: 0, gy: 0, pupil: 1,
@@ -780,7 +771,9 @@ document.addEventListener("click", () => { audioCtx(); $("unlock").style.display
 function showBubble(text) { clearTimeout(hideTimer); bubble.textContent = text; bubble.classList.add("show"); }
 function hideBubble(delay = 1500) { clearTimeout(hideTimer); hideTimer = setTimeout(() => bubble.classList.remove("show"), delay); }
 function setThinking(on) { if (on && !thinking) onThinkStart(); thinking = on; }
+let sayTimer = null, sayGen = 0;                  // a timer for text-only lines, and a counter so a stale line can't act after a newer one started
 function stopAudio() {
+  clearTimeout(sayTimer); sayTimer = null;
   if (source) { try { source.onended = null; source.stop(); } catch (e) {} source = null; }
   if (talking) onTalkEnd();
   talking = false;
@@ -791,17 +784,20 @@ function finished() {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "done" }));
 }
 async function say(msg) {
+  const my = ++sayGen;
   setThinking(false);
   stopAudio();
   showBubble(msg.text);
   onTalkStart();
   talkBL = pickBodyLang(msg.text);
-  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; setTimeout(finished, (msg.seconds || 3) * 1000); return; }
+  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000); return; }
   try {
     const c = audioCtx();
     if (c.state === "suspended") $("unlock").style.display = "block";
     const buf = await (await fetch(msg.audio)).arrayBuffer();
+    if (my !== sayGen) return;                     // a newer line started while this one was fetching
     const audio = await c.decodeAudioData(buf);
+    if (my !== sayGen) return;
     source = c.createBufferSource();
     source.buffer = audio;
     source.connect(analyser);
@@ -810,12 +806,13 @@ async function say(msg) {
     source.start();
   } catch (e) {
     console.error(e);
-    setTimeout(finished, (msg.seconds || 3) * 1000);
+    if (my === sayGen) sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000);
   }
 }
 
 // avatar settings (mode, home spot, size) come from the control page through the app, or from the URL
-const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, hiddenUntil: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
+const PROPS = {};   // filled in by the prop loader below; declared up here because applySettings can run at module start (?size=)
+const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
 const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1 };
 function applySettings(set = {}) {
   if (set.mode && ["stay", "wander", "roam", "walkon"].includes(set.mode)) { settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true; }
@@ -829,13 +826,15 @@ function applySettings(set = {}) {
     if (typeof a.sfx === "boolean") settings.acts.sfx = a.sfx;
     if (typeof a.scene === "string" && SCENES[a.scene] && a.scene !== settings.acts.scene) {
       settings.acts.scene = a.scene;
-      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && job.def.manual && !job.def.event) endJob(); }
+      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && !job.def.event && (!sceneAllows(job.name) || scene_().stick !== job.name)) endJob(); }   // the new scene ends whatever it doesn't allow (leaving gaming ends the desk job)
     }
   }
   if (set.do && set.do.name && Math.abs(Date.now() - (set.do.at || 0)) < 15000) doActivity(set.do.name, set.do);   // one-shot from the control page or an app event (ignored when replayed later)
 }
 function doActivity(name, info = {}) {
+  audioCtx();                                                       // a user-visible event: set up the audio context if it isn't yet
   if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return; }
+  if (job && job.def.event && !(JOBS[name] && JOBS[name].event)) return;   // a stream event is playing: bits and redeems wait for it to end
   if (name === "redeem") {                                          // a channel point redeem: show it, and act it out if the title suggests something
     const title = String(info.title || "a redeem"), who = String(info.who || "someone");
     showBanner(`${who.toUpperCase()} REDEEMED ${title.toUpperCase()}`.slice(0, 48), "#2ec4b6", 4.5); sfx("chime");
@@ -871,8 +870,10 @@ function connect() {
   ws = sock;
   ws.onopen = () => { wsDelay = 1000; ws.send(JSON.stringify({ type: "hello", role: "overlay" })); };
   ws.onmessage = ev => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "config") { if (msg.name) botName = msg.name; if (msg.avatar) applySettings(msg.avatar); }
+    audioCtx();                                 // first message: set up the audio context now (audioCtx resumes it if suspended)
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { console.error("bad frame from app", e); return; }
+    if (msg.type === "config") { if (msg.name) botName = msg.name; }
     else if (msg.type === "avatar") applySettings(msg.set || msg);
     else if (msg.type === "thinking") setThinking(true);
     else if (msg.type === "say") say(msg);
@@ -916,7 +917,7 @@ if (DEMO && !params.has("preview")) {
 }
 
 // ------------------------------------------------------------ animation state
-const S = {   // shared animation state (also fed to the VRM driver)
+const S = {   // shared animation state
   t: 0, level: 0, talk: 0, think: 0, blink: 0, gaze: { x: 0, y: 0 }, x: 0, yaw: 0,
   walkPhase: 0, moving: 0, hop: 0, nod: 0, tilt: 0, headYaw: 0,
 };
@@ -949,11 +950,11 @@ const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 const clock = new THREE.Clock();
 
 // arm poses: shoulder quaternion + elbow bend. Static poses from Euler angles, reach poses from two-bone IK.
-const ARM = { L1: 0.26, L2: 0.22, reach: 0.26 + 0.22 + 0.04 };
+// the arm's rest geometry as the model built it, read once before the first stretch: joint and mesh offsets, and the bone lengths (L1 shoulder to elbow, L2 elbow to hand)
+function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, up: arm.up.position.y, fore: arm.fore.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
 const eulerPose = (sx, sy, sz, ex) => ({ q: new THREE.Quaternion().setFromEuler(new THREE.Euler(sx, sy, sz)), ex });
 const POSE = {
   rest: s => eulerPose(0.05, 0, 0.18 * s, -0.25),
-  wave: s => eulerPose(-2.1, 0, 0.9 * s, -1.0),
   gestureOut: s => eulerPose(-0.9, 0, 0.85 * s, -1.1),
   gestureUp: s => eulerPose(-1.6, 0, 0.5 * s, -1.6),
   gesturePoint: s => eulerPose(-1.3, -0.3 * s, 0.25 * s, -0.4),
@@ -962,17 +963,17 @@ const POSE = {
 };
 const _m4 = new THREE.Matrix4(), _ax = new THREE.Vector3(), _ay = new THREE.Vector3(), _az = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3();
 function reachPose(arm, target) {            // target in torso space; returns a pose whose hand lands on (or points at) the target
-  const S = arm.sh.position;
+  const SP = arm.sh.position, R = armRest(arm), reachMax = R.L1 + R.L2 + 0.04;
   if (target.y > 0 && target.y < 0.69) {                       // a hand target inside his belly gets pushed out to the shirt
     const ez = target.z / 0.86, d = Math.hypot(target.x, ez), r = bodyR(target.y) + 0.075;
     if (d < r) { if (d < 1e-3) target = new THREE.Vector3(0, target.y, r * 0.86); else target = new THREE.Vector3(target.x / d * r, target.y, ez / d * r * 0.86); }
   }
-  _d.copy(target).sub(S);
+  _d.copy(target).sub(SP);
   const want = _d.length();
-  const k = clamp(want / (ARM.reach - 0.01), 1, 1.7);          // cartoon stretch when the target is out of reach (his head is huge)
-  const dist = clamp(want, 0.08, (ARM.reach - 0.01) * k);
+  const k = clamp(want / (reachMax - 0.01), 1, 1.25);          // cartoon stretch when the target is out of reach, capped at 1.25x so the arm never rubber-bands
+  const dist = clamp(want, 0.08, (reachMax - 0.01) * k);
   _d.normalize();
-  const L1 = ARM.L1 * k, L2 = (ARM.L2 + 0.04) * k;
+  const L1 = R.L1 * k, L2 = (R.L2 + 0.04) * k;
   const cosE = clamp((L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2), -1, 1);
   const cosS = clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1);
   const bend = Math.PI - Math.acos(cosE), offset = Math.acos(cosS);
@@ -996,7 +997,8 @@ function applyArm(arm, p, dt, rate = 7) {
   arm.sh.quaternion.copy(u.p.q);
   arm.el.rotation.x = u.p.ex;
   const k = u.p.k ?? 1;                                       // stretch the arm along its length
-  arm.el.position.y = -0.26 * k; arm.up.position.y = -0.18 * k; arm.up.scale.y = k; arm.fore.position.y = -0.1 * k; arm.fore.scale.y = k; arm.hand.position.y = -0.22 * k;
+  const R = armRest(arm);                                     // offsets come from the built model, so bone changes made there carry through
+  arm.el.position.y = R.el * k; arm.up.position.y = R.up * k; arm.up.scale.y = k; arm.fore.position.y = R.fore * k; arm.fore.scale.y = k; arm.hand.position.y = R.hand * k;
   keepArmOut(arm, k, p.reach);
 }
 // keep the arm outside his belly: swing the shoulder out until the upper arm, elbow, forearm and hand clear the body
@@ -1020,12 +1022,12 @@ function armHit(arm, k, which) {            // deepest point of this end of the 
   return best;
 }
 function keepArmOut(arm, k, reach) {
-  const S = arm.sh.position;
+  const SP = arm.sh.position;
   for (let pass = 0; pass < 6; pass++) {
     arm.sh.updateMatrixWorld(true);
     let h = reach ? null : armHit(arm, k, 1);
     if (h) {                                 // hand or forearm inside: swing the whole arm so the hand comes out (mostly forward when it's in front)
-      const v = h.p.sub(S), len = v.length(); if (len < 0.05) return;
+      const v = h.p.sub(SP), len = v.length(); if (len < 0.05) return;
       const axis = v.clone().cross(h.r); if (axis.lengthSq() < 1e-8) axis.set(0, 0, arm.side);
       arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(axis.normalize(), Math.min(0.5, (h.pen + 0.005) / len)));
       continue;
@@ -1033,7 +1035,7 @@ function keepArmOut(arm, k, reach) {
     h = armHit(arm, k, 0); if (reach) { const h2 = armHit(arm, k, 1); if (h2 && (!h || h2.pen > h.pen)) h = h2; }
     if (!h) return;                          // elbow inside: turn the arm around the shoulder-hand line so the hand stays put and the elbow pokes out
     _kh.set(0, -0.04, 0); arm.hand.localToWorld(_kh); torso.worldToLocal(_kh);
-    const ax = _kh.sub(S).normalize(), v = h.p.sub(S), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
+    const ax = _kh.sub(SP).normalize(), v = h.p.sub(SP), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
     const rt = h.r.clone().sub(ax.clone().multiplyScalar(ax.dot(h.r)));
     if (dist < 0.03 || rt.lengthSq() < 0.05) {
       if (reach) return;                     // can't swing it clear without moving the hand off what it holds
@@ -1100,14 +1102,13 @@ const PROP_SLOTS = {
   djdeck: { fx: -0.78, fz: 0.15, yaw: 0.22, half: 0.75 },
   couch:  { fx: 0.80,  fz: 0.10, yaw: -0.22, half: 1.0 },
   bed:    { fx: -0.74, fz: 0.02, yaw: 0.12, half: 1.55 },
-  arcade: { fx: 0.9,   fz: 0.25, yaw: -1.25, half: 0.5 },
+  arcade: { fx: 0.55,  fz: 0.25, yaw: -0.75, half: 0.5 },
   desk:   { fx: 0.8,   fz: 0.35, yaw: -0.25, half: 0.85 },
-  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.25 },
+  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.45 },
   fridge: { fx: -0.9,  fz: 0.3,  yaw: 0.55, half: 0.45 },
   plant:  { fx: 0.55,  fz: 0.55, yaw: -0.2, half: 0.3 },
   easel:  { fx: -0.55, fz: 0.4,  yaw: 0.3,  half: 0.6 },
 };
-const PROPS = {};
 let headphones = null;
 for (const name of Object.keys(PROP_SLOTS)) {
   import(`./props/${name}.js`).then(m => {
@@ -1132,6 +1133,22 @@ function placeProp(p) {
   p.inst.root.rotation.y = s.yaw;
   p.inst.root.scale.setScalar(size);
   p.inst.root.updateMatrixWorld(true);
+  p.foot = new THREE.Box3().setFromObject(p.inst.root).expandByScalar(0.3);   // footprint for the walk (cached until the prop is placed again)
+}
+// walks avoid shown props: random targets and walk midpoints are re-drawn when they land inside a footprint
+function propBlocked(x, z) {
+  for (const p of Object.values(PROPS)) { const f = p.foot; if (p.shown && f && x > f.min.x && x < f.max.x && z > f.min.z && z < f.max.z) return true; }
+  return false;
+}
+const walkBlocked = (x, z) => propBlocked(x, z) || propBlocked((x + nav.x) / 2, (z + nav.z) / 2);
+function freeTarget(gen) {                     // up to 8 draws from gen; keeps the old target when none is clear
+  for (let i = 0; i < 8; i++) { const [x, z] = gen(); if (!walkBlocked(x, z)) return [x, z]; }
+  return [nav.tx, nav.tz];
+}
+function freeX(x, z, xm) {                     // a job's stage spot at depth z: the same x if clear, else up to 8 other x in the stage; keeps x when none is clear
+  if (!walkBlocked(x, z)) return x;
+  for (let i = 0; i < 8; i++) { const cx = rand(-xm, xm); if (!walkBlocked(cx, z)) return cx; }
+  return x;
 }
 const propPt = (p, x, y, z) => p.inst.root.localToWorld(new THREE.Vector3(x, y, z));
 function poof(pos, n = 14, r = 0.9, color = null) {
@@ -1201,20 +1218,21 @@ function startJob(name, force = false) {
     const p = job.p;
     if (!p.shown) placeProp(p);
     const u = p.inst.spots.use;
+    job.spot = u;
     if (name === "dj") {                                       // round the side of the table to get behind it
       const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || 1);
       job.path = [propPt(p, side * 1.05, 0, 0.6), propPt(p, side * 1.05, 0, u.z), propPt(p, u.x, 0, u.z)];
-    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];
+    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];   // job.spot (set above) gives him the cabinet's facing: spotYaw
     else if (name === "couch") job.path = [propPt(p, u.x, 0, u.z + 0.75)];
-    else if (name === "nap") job.path = [propPt(p, -0.35, 0, 1.0)];
+    else if (name === "nap") job.path = [propPt(p, u.x, 0, u.z + 0.9)];   // walk to the foot end first, so the lie-down starts where he stands
     else if (name === "desk" || name === "desknap") { const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || -1); job.path = [propPt(p, side * 1.1, 0, 0.6), propPt(p, side * 1.1, 0, u.z - 0.1), propPt(p, u.x, 0, u.z - 0.1)]; }   // round the side of the desk to the chair
   } else if (name === "stare") {
     const z = stage.zNear;
-    job.path = [new THREE.Vector3(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), z, xMaxAt(z, size) * 0.6), 0, z)];
   } else if (name === "butterfly") { job.path = []; job.phase = "do"; job.t0 = S.t; job.until = S.t + 15; job.at = { x: nav.x, z: nav.z }; bfStart(); return true;
   } else if (name === "lieback") {                               // lie along the bottom edge of the screen; further back he'd look like he floats in mid-air (the overlay has no visible floor)
     const z = lerp(stage.zNear, stage.zFar, 0.12), xm = Math.max(0, xMaxAt(z, size) - 1.8 * size);
-    job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)];
   } else job.path = [new THREE.Vector3(nav.x, 0, nav.z)];
   if (name === "lieback") job.dir = job.path[0].x > 0 ? -1 : 1;            // head toward the middle of the screen
   return true;
@@ -1568,7 +1586,7 @@ function poseJob(t, dt) {
     p.st = { active: k > 0.5 && !asleep, typing, asleep };
   } else if (name === "arcade") {
     const p = job.p, A = p.inst.anchors;
-    J.yaw = p.slot.yaw + Math.PI;
+    J.yaw = p.slot.yaw + ((job.spot && job.spot.yaw) || 0);     // the cabinet spot's facing (profile, so the screen shows)
     if (t > job.nextSub) { job.sub = Math.random() < 0.2 ? 1 + Math.floor(Math.random() * 2) : 0; job.nextSub = t + (job.sub ? 1.6 : rand(4, 9)); }
     const stick = { x: Math.sin(t * 5.3) * Math.sin(t * 1.3), y: Math.sin(t * 3.7) * 0.6 };
     const press = [Math.sin(t * 17) > 0.3, Math.sin(t * 11 + 1) > 0.6, Math.sin(t * 7 + 2) > 0.7];
@@ -1684,13 +1702,14 @@ function tone(type, f0, f1, dur, vol = 0.3, delay = 0, vib = 0) {
   g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g); g.connect(sfxBus); o.start(t0); o.stop(t0 + dur + 0.05);
 }
+let noiseBuf = null;                                // one 2 s white-noise buffer, reused by every noise() (each play is cut to its own length)
 function noise(dur, vol = 0.3, delay = 0, freq = 1000, ftype = "bandpass") {
-  const c = sfxOut(), t0 = c.currentTime + delay, n = Math.ceil(c.sampleRate * dur), b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const c = sfxOut(), t0 = c.currentTime + delay;
+  if (!noiseBuf) { noiseBuf = c.createBuffer(1, Math.ceil(c.sampleRate * 2), c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
   const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
-  s.buffer = b; f.type = ftype; f.frequency.value = freq;
+  s.buffer = noiseBuf; f.type = ftype; f.frequency.value = freq;
   g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0);
+  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0, 0, dur);
 }
 const SFX = {
   pop: () => tone("sine", 500, 1100, 0.12, 0.3),
@@ -1750,7 +1769,8 @@ function eventStart(name, info, size) {
   }
   job.at = { x: nav.x, z: nav.z };
   const B = {
-    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"], sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : `NEW SUB: ${who}!`, "#8a5cff"],
+    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"],
+    sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : n > 1 ? `${n} GIFT SUBS FROM ${who}!` : `NEW SUB: ${who}!`, "#8a5cff"],
     bits: [`${n ? n + " " : ""}BITS FROM ${who}!`, "#ffb300"], follow: [`THANKS FOR THE FOLLOW, ${who}!`, "#2ec4b6"], hype: ["CHAT IS HYPED!", "#ff6b00"], rip: ["RIP DUM  o7", "#6b7280"],
   }[name];
   showBanner(B[0], B[1], (job.until - S.t) - 0.4);
@@ -1910,9 +1930,9 @@ function startJob3(name, size) {
     job.spot = s;
     job.path = [propPt(p, s.x, 0, s.z + 0.4), propPt(p, s.x, 0, s.z)];
   } else if (job.def.event) eventStart(name, pendingInfo, size);
-  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)]; }
+  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)]; }
   else if (name === "goodbye") job.path = [new THREE.Vector3(0, 0, lerp(stage.zFar, stage.zNear, 0.7))];
-  else if (name === "sign") job.path = [new THREE.Vector3(clamp(nav.x, -1.5 * size, 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
+  else if (name === "sign") job.path = [new THREE.Vector3(freeX(clamp(nav.x, -1.5 * size, 1.5 * size), lerp(stage.zFar, stage.zNear, 0.6), 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
   else if (name === "chatfloor") job.path = [new THREE.Vector3(clamp(nav.x, -1.5, 1.5), 0, stage.zNear)];
   if (name === "read") { job.kind = Math.random() < 0.5 ? "paper" : "book"; job.seated = job.kind === "book" && Math.random() < 0.6; }
   if (name === "snack") job.food = Math.random() < 0.5 ? "pizza" : "chips";
@@ -1922,8 +1942,8 @@ function startJob3(name, size) {
 }
 
 // ---- jobs: what he does there
-const FLOOR_LEGS = [{ hp: -1.35, kn: 2.5, ft: 0.4, z: -0.75 }, { hp: -1.35, kn: 2.5, ft: 0.4, z: 0.75 }];
-function sitFloor(k, size, drop = 0.34) {
+const FLOOR_LEGS = [{ hp: -1.57, kn: 0.15, ft: 0.25, z: -0.35 }, { hp: -1.57, kn: 0.15, ft: 0.25, z: 0.35 }];   // legs out in front, heels on the floor (was a kneel: the shins folded back)
+function sitFloor(k, size, drop = 0.30) {
   J.root = new THREE.Vector3(job.at.x, -drop * size, job.at.z); J.rootQ = new THREE.Quaternion(); J.rootW = k;
   J.legs = FLOOR_LEGS; J.legW = k;
 }
@@ -1978,8 +1998,8 @@ function poseJob3(name, t, dt, k) {
   if (name === "floorsit") {
     sitFloor(k, size);
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(6, 12); }
-    if (job.sub === 0) { J.torsoX = -0.3; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands
-    else if (job.sub === 1) { J.torsoX = 0.15; J.armN = reachPose(armN, tp(-0.24, 0.02, 0.36)); J.armP = reachPose(armP, tp(0.24, 0.02, 0.36)); }   // hands on his knees
+    if (job.sub === 0) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands (the reach clamp keeps the arms short)
+    else if (job.sub === 1) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.16, 0.0, 0.27)); J.armP = reachPose(armP, tp(0.16, 0.0, 0.27)); }   // hands resting on his knees
     else { J.torsoX = 0.1; J.armN = reachPose(armN, tp(-0.12, 0.08, 0.36)); J.armP = reachPose(armP, headPoint(0.25, -0.8, 0.15)); }               // chin in his hand
     J.wN = J.wP = k; J.neck = [0, 0.35 * Math.sin(t * 0.3), 0.08 * Math.sin(t * 0.5)]; J.neckW = k;
     J.face = fs => { fs.mouth.smile += 0.2; };
@@ -2096,7 +2116,7 @@ function poseJob3(name, t, dt, k) {
     if (job.phase === "do") sweat(t, size, effort);
     p.st = { active: k > 0.5, takeL: e === 3 && on > 0.05, takeR: e === 3 && on > 0.05 };
   } else if (name === "punch") {
-    J.yaw = spotYaw;
+    J.yaw = spotYaw - 0.35;                                   // a turn toward the camera, so the bag sits beside his head rather than behind it
     const hitW = propPt(p, A.bagHit.x, A.bagHit.y, A.bagHit.z), bonked = job.bonkT && t - job.bonkT < 1.8;
     job.punches ??= 0;
     if (bonked) {
@@ -2299,7 +2319,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     J.capPop = 2.2 * catching;                                    // holds his cap up to catch the coins
     capG.getWorldPosition(V1);
     J.armN = reachPose(armN, toTorso(V1.clone().add(V2.set(-0.3, 0, 0).multiplyScalar(size * J.scale)))); J.armP = reachPose(armP, toTorso(V1.clone().add(V2.set(0.3, 0, 0).multiplyScalar(size * J.scale)))); J.wN = J.wP = k * catching;
-    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * 2.2 * size, z: job.at.z, speed: 2.2 * size };
+    const sway = Math.max(0, Math.min(2.2 * size, xMaxAt(job.at.z, size) - 0.5 * size));   // keep the sway inside the frame (matters on a square source)
+    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * sway, z: job.at.z, speed: 2.2 * size };
     J.yaw = 0; J.look = { x: 0, y: 0.9 };
     J.face = fs => { fs.wide += 0.4; fs.mouth.open = Math.max(fs.mouth.open, 0.6); fs.mouth.smile += 1; fs.pupil += 0.3; fs.browY = fs.browY.map(v => v + 1); };
     if (once("rain1", k2 > 0.4)) { FX.coins?.rain(0, W, clamp(Math.round(n / 4), 60, 400)); sfx("airhorn"); }
@@ -2334,7 +2355,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     if (live && t > nextFloat && k2 > 1) { floater(screenPt(rand(-0.9, 0.9), -0.8, stage.zNear), fTex, V2.set(0, 0.6, 0).multiplyScalar(size)); nextFloat = t + 0.25; }
   }
   if (!J.root) { J.root = new THREE.Vector3(nav.x, S.hop * size, nav.z); J.rootQ = yawQ(J.yaw ?? 0); J.rootW = 1; }
-  if (stage.wide) J.root.y -= (J.scale - 1) * 1.75 * size;           // giant: he stands in front of the bottom edge so his whole face fits on screen
+  // giant: he stands in front of the bottom edge so his whole face fits on screen (the square frame is lower, so he drops further)
+  J.root.y -= (J.scale - 1) * (stage.wide ? 1.75 : 2.4) * size;
 }
 
 function blendFace(fs, fn, w) {                                // apply an activity's face changes to a copy, then mix by weight
@@ -2430,7 +2452,7 @@ function update(dt) {
     speed = 0.5 * size;
     if (want) { nav.tx = clamp(nav.x, homeX - 0.5, homeX + 0.5); nav.tz = clamp(nav.z, homeZ - 0.4, homeZ + 0.4); }
     else if (t > nav.nextDecision) {
-      nav.tx = clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm); nav.tz = clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear);
+      [nav.tx, nav.tz] = freeTarget(() => [clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm), clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear)]);
       nav.nextDecision = t + rand(4, 10);
     }
   } else if (mode === "roam") {
@@ -2447,12 +2469,8 @@ function update(dt) {
         nav.x = side * (xMaxAt(nav.z, size) + 2.2 * size);
         nav.tx = side * rand(0.2, 0.8) * Math.max(0, xMaxAt(nav.z, size) - margin); nav.tz = nav.z;
         nav.nextDecision = t + rand(4, 9);
-      } else if (false) {                                            // (wandering off screen is off: g doesn't want him leaving the screen)
-        nav.tx = Math.sign(nav.x || 1) * (xMaxAt(nav.z, size) + 2.2 * size); nav.tz = nav.z;
-        nav.nextDecision = t + rand(8, 16);
       } else {
-        nav.tz = rand(stage.zFar, stage.zNear);
-        nav.tx = rand(-1, 1) * Math.max(0, xMaxAt(nav.tz, size) - margin);
+        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear); return [rand(-1, 1) * Math.max(0, xMaxAt(z, size) - margin), z]; });
         nav.nextDecision = t + rand(3, 9);
       }
     }
@@ -2610,7 +2628,6 @@ function update(dt) {
   }
 
   updateFur(t);
-  if (vrmRig) { vrmRig.update(dt, S); return; }
 
   // ---- drive the built-in model
   byte.position.set(nav.x, S.hop * size, nav.z);
@@ -2663,8 +2680,8 @@ function update(dt) {
     else pN = blendPose(pN, reachPose(armN, headPoint(-0.15, -0.85, thinkStyle === "pencil" ? 0.3 + 0.06 * Math.max(0, Math.sin(t * 14)) : 0.08)), S.think);   // hand on chin, or tapping a pencil on it
   }
   if (act.name === "drag") pP = blendPose(pP, reachPose(armP, headPoint(0.3, -0.72, 0.2)), Math.sin(Math.min(1, ap / 0.75) * Math.PI) ** 0.5);  // hand to the cigarette
-  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.2, 0.25 + Math.sin(t * 16) * 0.05, 0.12)), w); }
-  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.45, 0.35, 0.35)), Math.sin(ap * Math.PI) ** 0.5);
+  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.0, 0.2 + Math.sin(t * 16) * 0.04, 0.12)), w); }   // the temple, not the crown
+  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.95, 0.27, 0.22)), Math.sin(ap * Math.PI) ** 0.5);   // the hand on the brim at the side of his head
   if (act.name === "wave") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, eulerPose(-2.1, 0, 0.9 + Math.sin(t * 14) * 0.25, -1.0), w); }
   if (act.name === "stretch") { const w = Math.sin(ap * Math.PI) ** 0.5; pN = blendPose(pN, POSE.up(-1), w); pP = blendPose(pP, POSE.up(1), w); }
   if (S.hop > 0) { const hopQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.6, 0, 0)); pN.q.premultiply(hopQ); pP.q.premultiply(hopQ); }
@@ -2724,11 +2741,13 @@ function update(dt) {
     bubble.style.left = px + "px"; bubble.style.top = py + "px";
   }
 }
+let lastFrameErr = null;
 function tick() {
+  requestAnimationFrame(tick);                        // queue the next frame first, so one bad prop frame can't freeze the overlay
   const dtf = Math.min(clock.getDelta(), 0.05);
-  if (!debug.frozen) update(dtf);                     // byteDebug.frozen = true holds the pose for preview screenshots
+  try { if (!debug.frozen) update(dtf); }            // byteDebug.frozen = true holds the pose for preview screenshots
+  catch (e) { if (String(e && e.message) !== lastFrameErr) { lastFrameErr = String(e && e.message); console.error(e); } }   // log each distinct error once
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
 }
 addEventListener("resize", resize);
 resize();
