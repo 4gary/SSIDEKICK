@@ -313,8 +313,7 @@ class Sidekick:
                     role = msg.get("role")
                     if role == "overlay":
                         self.overlays.add(ws)
-                        png = all(os.path.exists(os.path.join(OVERLAY, "avatar", f)) for f in ("closed.png", "open.png"))
-                        await ws.send_json({"type": "config", "name": self.bot["name"], "png": png})
+                        await ws.send_json({"type": "config", "name": self.bot["name"]})
                         await ws.send_json({"type": "avatar", "set": self.avatar})
                         log.info("Overlay connected")
                     else:
