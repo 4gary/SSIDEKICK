@@ -44,6 +44,7 @@
   .ctl button { background: #7c5cff; color: #fff; border: 0; border-radius: 8px; padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; }
   .ctl button.g { background: transparent; border: 1px solid #2e2950; color: #ecebf5; }
   .ctl .hint { font-size: 12px; color: #9b97b8; margin-top: 6px; }
+  .ctl button:disabled { opacity: .4; cursor: default; }
   .preview { display: flex; justify-content: center; background: repeating-conic-gradient(#1a1730 0 25%, #221e3d 0 50%) 0 0 / 24px 24px; border-radius: 10px; min-height: 80px; }
 </style>
 </head>
@@ -69,8 +70,6 @@ function connect(delay = 1000) {
   ws.onclose = () => setTimeout(() => connect(Math.min(delay * 1.5, 10000)), delay);
 }
 
-function left(sec) { const s = Math.max(0, sec - Math.floor((Date.now() - recv) / 1000)); return s + "s"; }
-
 function opts(list, counts, mark, letters) {
   const total = (counts || []).reduce((a, b) => a + b, 0) || 1;
   return list.map((o, i) => {
@@ -80,48 +79,68 @@ function opts(list, counts, mark, letters) {
   }).join("");
 }
 
+// Cards stay on screen and are updated in place. A card is rebuilt only when its content changes, and
+// countdowns only change their text, so each card's pop-in animation plays once, when it appears.
+const sigs = new Map();   // card key -> last html, so unchanged cards are not rebuilt
+function timer(ends, sec) { ends.push(recv + sec * 1000); return '<span class="timer"></span>'; }
 function render() {
-  const out = [];
-  const s = state;
+  const want = [], s = state;
   if (s.trivia) {
-    const t = s.trivia;
+    const t = s.trivia, ends = [];
     if (t.phase === "asking" || t.phase === "reveal") {
-      out.push(`<div class="card"><span class="tag pink">TRIVIA · Q${t.n + (t.phase === "reveal" ? 0 : 1)}/${t.rounds}${t.topic ? " · " + esc(t.topic).toUpperCase() : ""}</span>
+      want.push({ key: "trivia", ends, html: `<span class="tag pink">TRIVIA · Q${t.n + (t.phase === "reveal" ? 0 : 1)}/${t.rounds}${t.topic ? " · " + esc(t.topic).toUpperCase() : ""}</span>
         <p class="q">${esc(t.question)}</p>${opts(t.choices, null, t.phase === "reveal" ? t.answer : undefined, true)}
-        <div class="foot"><span>${t.phase === "reveal" ? "Answer: " + "ABCD"[t.answer] : "Type A, B, C or D"} · ${t.answered} answered</span>${t.phase === "asking" ? `<span class="timer">${left(t.left)}</span>` : ""}</div></div>`);
+        <div class="foot"><span>${t.phase === "reveal" ? "Answer: " + "ABCD"[t.answer] : "Type A, B, C or D"} · ${t.answered} answered</span>${t.phase === "asking" ? timer(ends, t.left) : ""}</div>` });
     } else if (t.phase === "done" && t.scores.length) {
-      out.push(`<div class="card"><span class="tag lime">TRIVIA CHAMP</span><div class="big">${esc(t.scores[0][0])}</div>
-        <div class="board" style="margin-top:10px">${t.scores.map(([u, p]) => `<div><span>${esc(u)}</span><span>${p}</span></div>`).join("")}</div></div>`);
+      want.push({ key: "trivia", ends, html: `<span class="tag lime">TRIVIA CHAMP</span><div class="big">${esc(t.scores[0][0])}</div>
+        <div class="board" style="margin-top:10px">${t.scores.map(([u, p]) => `<div><span>${esc(u)}</span><span>${p}</span></div>`).join("")}</div>` });
     } else if (t.phase === "loading" || t.phase === "ready") {
-      out.push(`<div class="card"><span class="tag pink">TRIVIA${t.topic ? " · " + esc(t.topic).toUpperCase() : ""}</span><p class="q">Get ready… ${t.rounds} questions</p><div class="foot"><span>Answer with A, B, C or D in chat</span></div></div>`);
+      want.push({ key: "trivia", ends, html: `<span class="tag pink">TRIVIA${t.topic ? " · " + esc(t.topic).toUpperCase() : ""}</span><p class="q">Get ready… ${t.rounds} questions</p><div class="foot"><span>Answer with A, B, C or D in chat</span></div>` });
     }
   }
   if (s.poll) {
-    const p = s.poll, best = Math.max(...p.counts);
-    out.push(`<div class="card"><span class="tag">${p.closed ? "POLL RESULTS" : "CHAT POLL"}</span><p class="q">${esc(p.question)}</p>
+    const p = s.poll, best = Math.max(...p.counts), ends = [];
+    want.push({ key: "poll", ends, html: `<span class="tag">${p.closed ? "POLL RESULTS" : "CHAT POLL"}</span><p class="q">${esc(p.question)}</p>
       ${opts(p.options, p.counts, p.closed && best > 0 ? p.counts.indexOf(best) : undefined)}
-      <div class="foot"><span>${p.closed ? p.counts.reduce((a, b) => a + b, 0) + " votes" : "Type the number to vote"}</span>${p.closed ? "" : `<span class="timer">${left(p.left)}</span>`}</div></div>`);
+      <div class="foot"><span>${p.closed ? p.counts.reduce((a, b) => a + b, 0) + " votes" : "Type the number to vote"}</span>${p.closed ? "" : timer(ends, p.left)}</div>` });
   }
   if (s.predict) {
-    const p = s.predict;
-    out.push(`<div class="card"><span class="tag pink">PREDICTION${p.locked ? " · LOCKED" : ""}</span><p class="q">${esc(p.question)}</p>
+    const p = s.predict, ends = [];
+    want.push({ key: "predict", ends, html: `<span class="tag pink">PREDICTION${p.locked ? " · LOCKED" : ""}</span><p class="q">${esc(p.question)}</p>
       ${p.options ? opts(p.options, p.counts) : `<div class="foot" style="margin:0"><span>Type <b>!pick name</b> to call it</span></div>`}
-      <div class="foot"><span>${p.count} picks</span>${p.locked ? "" : `<span class="timer">${left(p.left)}</span>`}</div></div>`);
+      <div class="foot"><span>${p.count} picks</span>${p.locked ? "" : timer(ends, p.left)}</div>` });
+  }
+  if (s.race && s.race.running) {
+    want.push({ key: "race-live", ends: [], html: `<span class="tag lime">MARBLE RACE · LIVE</span><p class="q">Race in progress</p>
+      ${s.race.champ ? `<div class="foot"><span>Defending champ: ${esc(s.race.champ)}</span></div>` : ""}` });
   }
   if (flash && Date.now() < flash.until) {
     if (flash.kind === "race" && flash.data.winner) {
       const d = flash.data;
-      out.push(`<div class="card"><span class="tag lime">MARBLE RACE WINNER</span><div class="big">${esc(d.winner)}</div>
-        <div class="foot"><span>${d.last ? "Last place: " + esc(d.last) : ""}</span><span>${d.called && d.called.length ? "Called it: " + d.called.map(esc).join(", ") : ""}</span></div></div>`);
+      want.push({ key: "race-result", ends: [], html: `<span class="tag lime">MARBLE RACE WINNER</span><div class="big">${esc(d.winner)}</div>
+        <div class="foot"><span>${d.last ? "Last place: " + esc(d.last) : ""}</span><span>${d.called && d.called.length ? "Called it: " + d.called.map(esc).join(", ") : ""}</span></div>` });
     }
     if (flash.kind === "board" && s.board && s.board.length) {
-      out.push(`<div class="card"><span class="tag">LEADERBOARD</span><div class="board">${s.board.map(([u, p]) => `<div><span>${esc(u)}</span><span>${p}</span></div>`).join("")}</div></div>`);
+      want.push({ key: "board", ends: [], html: `<span class="tag">LEADERBOARD</span><div class="board">${s.board.map(([u, p]) => `<div><span>${esc(u)}</span><span>${p}</span></div>`).join("")}</div>` });
     }
   }
-  const html = out.join("");
-  if ($("#stack").dataset.html !== html) { $("#stack").innerHTML = html; $("#stack").dataset.html = html; }
+  const stack = $("#stack"), keys = new Set(want.map(w => w.key));
+  [...stack.children].forEach(el => { if (!keys.has(el.dataset.key)) { el.remove(); sigs.delete(el.dataset.key); } });
+  want.forEach((w, i) => {
+    let el = stack.querySelector(`[data-key="${w.key}"]`);
+    if (!el) { el = document.createElement("div"); el.className = "card"; el.dataset.key = w.key; stack.insertBefore(el, stack.children[i] || null); }
+    if (sigs.get(w.key) !== w.html) { sigs.set(w.key, w.html); el.innerHTML = w.html; }
+    el.querySelectorAll(".timer").forEach((t, j) => { t.dataset.end = w.ends[j]; });
+  });
+  tick();
 }
-setInterval(() => { document.querySelectorAll(".timer").length && render(); if (flash && Date.now() > flash.until) { flash = null; render(); } }, 1000);
+// countdowns: text only, no DOM rebuild; also drops the flash cards when their time is up
+function tick() {
+  const now = Date.now();
+  document.querySelectorAll("#stack .timer[data-end]").forEach(t => { t.textContent = Math.max(0, Math.ceil((Number(t.dataset.end) - now) / 1000)) + "s"; });
+  if (flash && now > flash.until) { flash = null; render(); }
+}
+setInterval(tick, 250);
 
 if (CONTROL) {
   document.body.classList.add("control");
@@ -133,7 +152,7 @@ if (CONTROL) {
       <div class="row"><input id="tt" placeholder="Topic (blank = mixed)"><input class="s" id="tr" placeholder="3 qs"><button data-c="trivia">Start</button><button class="g" data-c="triviastop">Stop</button></div></div>
     <div class="box"><label>Prediction (blank options = Yes / No)</label>
       <div class="row"><input id="xq" placeholder="Will dum beat this boss?"><input id="xo" placeholder="Yes | No"><button data-c="predict">Open</button><button class="g" data-c="lock">Lock</button><button class="g" data-c="cancel">Cancel</button></div>
-      <div class="row" style="margin-top:8px"><input id="xr" placeholder="What happened (option text or number)"><button data-c="resolve">Settle it</button></div></div>
+      <div class="row" style="margin-top:8px"><input id="xr" placeholder="What happened (option text or number)"><button id="settle" data-c="resolve" disabled>Settle it</button></div></div>
     <div class="box"><label>Marble race</label>
       <div class="row"><button data-c="racestart">Race starting</button><input id="rw" placeholder="Winner"><input id="rl" placeholder="Last place (optional)"><button data-c="raceend">Race over</button></div>
       <div class="hint">Streamer.bot Fetch URL works too: /api/race?state=start and /api/race?state=end&amp;winner=NAME&amp;last=NAME</div></div>
@@ -158,7 +177,23 @@ if (CONTROL) {
     voice: () => ({ cmd: "voice", effect: "random" }), recap: () => ({ cmd: "recap" }),
     raid: () => ({ cmd: "raid", user: v("ru") || "TestRaider", viewers: parseInt(v("rv")) || 12, game: v("rg") }),
   };
-  document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => send(C[b.dataset.c]()));
+  // Settle needs an outcome; Cancel needs a second click within 3 s so a stray click cannot drop every pick
+  $("#xr").oninput = () => { $("#settle").disabled = !v("xr"); };
+  const armed = new Map();
+  document.querySelectorAll("[data-c]").forEach(b => {
+    const label = b.textContent;
+    b.onclick = () => {
+      const c = b.dataset.c;
+      if (c === "resolve" && !v("xr")) return;
+      if (c === "cancel" && !armed.has(b)) {
+        b.textContent = "Really cancel?";
+        armed.set(b, setTimeout(() => { armed.delete(b); b.textContent = label; }, 3000));
+        return;
+      }
+      if (armed.has(b)) { clearTimeout(armed.get(b)); armed.delete(b); b.textContent = label; }
+      send(C[c]());
+    };
+  });
 }
 connect();
 </script>
