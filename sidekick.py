@@ -363,7 +363,7 @@ class Sidekick:
                 elif t == "streamer":
                     await self.on_streamer(msg.get("text", ""))
                 elif t == "say":
-                    self.jobs.append(("say", None, msg.get("text", "")))
+                    self.jobs.append(("say", "dum", msg.get("text", "")))   # dum typed it: spoken even during a break
                 elif t == "event":
                     await self.on_event(msg.get("text", ""))
                 elif t == "idle_now":

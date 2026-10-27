@@ -383,9 +383,10 @@ class Features:
         try:
             if await self.quiet_command(cmd):
                 return True
-            if self.muted() and self.sk.name_re.search(text):
-                self.unmute()     # dum called him by name: he's back and answers
-            return await self.command(cmd, raw)
+            handled = await self.command(cmd, raw)
+            if not handled and self.muted() and self.sk.name_re.search(text):
+                self.unmute()     # dum called him by name to talk: he's back and answers (a command like a voice FX button keeps the break)
+            return handled
         except Exception as e:
             log.error("Feature command failed: %s", e)
             return False
@@ -417,8 +418,8 @@ class Features:
 
     def may_speak(self, kind, who=None):
         """Called by sidekick.py before every line. While muted only alerts (and the "going quiet" line) get through."""
-        if not self.muted() or who == "quiet":
-            return True
+        if not self.muted() or who in ("quiet", "dum"):
+            return True   # "dum" = dum's own Say exactly from the dock or control page, which gets through a break
         return kind in ("alert", "event") and self.cfg["quiet"].get("alerts_while_muted", True)
 
     async def cut_off(self):
