@@ -74,9 +74,17 @@ weather = "You are the weatherman of DUMSTREAM Weather, powered by the Doppler 9
 # Gary glances at the stream now and then and reacts to the game. Needs a model with vision loaded in
 # LM Studio (Gemma 4 can see images) and OBS's WebSocket server on (OBS: Tools -> WebSocket Server Settings).
 enabled = true
-model = ""                   # blank = the model already loaded. Or a separate vision model's name in LM Studio
-glance_minutes = 4           # look at the screen this often
+model = "google/gemma-4-e4b" # 2026-10-27: Qwen talks but can't see, so Gemma is his eyes. Blank = the talking model. LM Studio must keep both loaded (Server Settings: "Only Keep Last JIT Loaded Model" OFF)
+glance_minutes = 2           # look at the screen this often (was 4; Gemma looks fast)
 comment_chance = 0.35        # chance he says something about what he saw (otherwise it's just context)
+
+[deafen]
+# Deafen = Gary can't hear your mic at all (nothing is transcribed, logged or remembered). Chat still works.
+# Dock: the red Deafen button. Voice: "Gary, cover your ears". Hotkey: a Streamer.bot action that fetches
+# http://localhost:7777/api/deafen?on=toggle  (turning it back on is button/hotkey only: he can't hear you)
+auto_scenes = ["brb"]   # stream modes that deafen him automatically (undone when you leave them)
+remember_on_restart = true    # still deafened after a restart or crash until you turn it off
+forget_minutes = 10           # the dock's "Forget" button erases this many minutes of what was said
 
 [obs]
 url = ""                     # blank = read from OBS's settings (usually ws://127.0.0.1:4455)

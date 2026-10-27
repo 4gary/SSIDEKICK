@@ -25,6 +25,7 @@ import aiohttp
 from urllib.parse import urlsplit
 from aiohttp import web
 
+import guard
 from obs import OBS
 
 log = logging.getLogger("features")
@@ -57,6 +58,8 @@ DEFAULTS = {
               "alerts_while_muted": True, "away_activities": ["nap", "couch", "dj", "arcade", "phone", "lieback"]},
     "roles": {},
     "vision": {"enabled": True, "model": "", "glance_minutes": 4, "comment_chance": 0.35},
+    # 2026-10-27 dum: "i need a mute button for gary so if im talking i dont want him to hear it"
+    "deafen": {"auto_scenes": ["brb"], "remember_on_restart": True, "forget_minutes": 10},
     "obs": {"url": "", "password": ""},
 }
 
@@ -178,6 +181,15 @@ class Features:
         self.mute_until = 0.0       # Gary stays quiet until then (inf = until told)
         self.away = None            # {"mode": mode to go back to, "next": time of next idle activity} while sent away
         self.held = None            # (time, line) Gary got cut off on, for "go ahead"
+        # Deafened: the mic is thrown away before speech-to-text. Kept across restarts (fail safe): a crash
+        # mid-phone-call must not come back up listening. deaf_until is a time.time(), inf = until turned back on
+        d = self.state.get("deaf") or {}
+        keep = self.cfg["deafen"].get("remember_on_restart", True)
+        until = d.get("until")
+        self.deaf_until = (float("inf") if until == "on" else float(until or 0)) if keep else 0.0
+        self.deaf_auto = bool(d.get("auto")) and keep
+        if self.deaf_until > time.time():
+            log.info("Gary is still deafened from before the restart (turn it off in the dock)")
         # where he was told to stand, and the control page settings: sidekick.py deep-merges saved_avatar on startup
         saved = {k: copy.deepcopy(v) for k, v in (self.state.get("avatar") or {}).items() if k != "do"}
         self.saved_avatar = saved or None
@@ -247,8 +259,9 @@ class Features:
         "give them a fake title or award on the spot",
     ]
 
-    def alert_task(self, prompt):
+    def alert_task(self, prompt, kind=None):
         angle = random.choice(self.ALERT_ANGLES)
+        prompt += self.sk.mission.alert_flavor(kind) if kind else ""
         self.task(prompt + f" This time, {angle}. Make it sound off the cuff, like you just noticed it. Never use stock "
                   "lines like 'thanks for the follow', 'thank you for subscribing' or 'welcome to the stream', and don't "
                   "start the way you started your last alert. Keep it short.", alert=True)
@@ -304,6 +317,10 @@ class Features:
             asyncio.create_task(self._chat(text))
 
     async def _chat(self, text):
+        why = guard.unsafe(text)
+        if why:
+            log.warning("[guard] Didn't post a chat message with %s", why)
+            return
         try:
             await self.sk.sb.request("SendMessage", platform="twitch", bot=False, internal=True,
                                      message=(CHAT_PREFIX + text)[:480])
@@ -412,13 +429,41 @@ class Features:
     def muted(self):
         return self.mute_until > time.monotonic()
 
+    def is_deaf(self):
+        return self.deaf_until > time.time()
+
+    async def deafen(self, on, minutes=None, auto=False, why="dock"):
+        """Deafen or undeafen Gary. An automatic (scene) deafen never undoes one dum turned on himself."""
+        if on:
+            if self.is_deaf() and not self.deaf_auto and auto:
+                return
+            self.deaf_until = time.time() + minutes * 60 if minutes else float("inf")
+            self.deaf_auto = auto
+            log.info("Deafened (%s): Gary can't hear the mic%s", why,
+                     f" for {minutes:g} minutes" if minutes else " until it's turned back on")
+            if self.sk.busy and self.sk.transcript and self.sk.transcript[-1].startswith(self.streamer + ":"):
+                pass    # a reply to dum's last line may already be on its way; that's fine, it was said before
+        else:
+            if not self.is_deaf() or (auto and not self.deaf_auto):
+                return
+            self.deaf_until, self.deaf_auto = 0.0, False
+            log.info("Undeafened (%s): Gary can hear the mic again", why)
+        self.state["deaf"] = {"until": "on" if self.deaf_until == float("inf") else self.deaf_until, "auto": self.deaf_auto}
+        self.save()     # right away, not in 20 s: a crash must come back up still deafened
+        await self.sk.send_overlays({"type": "avatar", "set": {"deaf": self.is_deaf()}})
+        await self.sk.push_status()
+
+    async def deaf_tick(self):
+        if self.deaf_until and self.deaf_until != float("inf") and time.time() >= self.deaf_until:
+            await self.deafen(False, why="time's up")
+
     def queued(self):
         """True while a chat job or an alert is waiting to be spoken (alerts live in sidekick.py's own FIFO)."""
         return bool(self.sk.jobs or getattr(self.sk, "alerts", None))
 
     def may_speak(self, kind, who=None):
         """Called by sidekick.py before every line. While muted only alerts (and the "going quiet" line) get through."""
-        if not self.muted() or who in ("quiet", "dum"):
+        if not self.muted() or who == "quiet" or (who == "dum" and kind != "answer"):
             return True   # "dum" = dum's own Say exactly from the dock or control page, which gets through a break
         return kind in ("alert", "event") and self.cfg["quiet"].get("alerts_while_muted", True)
 
@@ -436,6 +481,26 @@ class Features:
 
     async def quiet_command(self, c):
         q = self.cfg["quiet"]
+        # "stop talking about the dumpster" must not be read as "stop talking" (a mute)
+        topic = self.sk.mission.drop_topic(c)
+        if topic is not None:
+            await self.cut_off()
+            self.sk.jobs.append(("say", "quiet", random.choice(["Fine, dropping it.", "Okay, okay, I'll let it go.",
+                                                                 "Noted. Never speaking of it again."])))
+            return True
+        if re.search(r"\b(cover your ears|deafen yourself|earmuffs( on)?|plug your ears|stop listening to me)\b", c):
+            # he can't hear "you can listen again", so a voice deafen always has an end (dock/hotkey can end it sooner)
+            m = re.search(r"\bfor (\d+|an?|one|two|three|five|ten|fifteen|twenty|thirty) ?(min|minutes?|hours?|hr)", c)
+            words = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20,
+                     "thirty": 30}
+            mins = 15
+            if m:
+                mins = int(m[1]) if m[1].isdigit() else words[m[1]]
+                mins = min(mins * (60 if m[2].startswith("h") else 1), 240)
+            await self.deafen(True, mins, why="dum said so")
+            self.sk.jobs.append(("say", "quiet", random.choice(["Ears covered.", "La la la, can't hear you.",
+                                                                 "Earmuffs on."])))
+            return True
         if re.search(r"\b(you can (talk|speak)( again)?|talk again|come back|unmute|you'?re (back|unmuted)|"
                      r"welcome back|break'?s over)\b", c):
             if self.muted():
@@ -539,6 +604,8 @@ class Features:
     async def command(self, c, raw=None):
         """c is the lowercase command; raw is the same text with its original case (for names and topics)."""
         raw = c if raw is None else raw
+        if self.sk.mission.command(c):      # "read your journal"
+            return True
         start = r"\b(start|do|run|make|host|open|let'?s (do|have|play)|time for|new|another|quick)\b"
         if await self.move_command(c):
             return True
@@ -695,6 +762,23 @@ class Features:
             self.announce_leaderboard()
         elif kind == "features":
             return self.status()
+        elif kind == "deafen":      # /api/deafen?on=1|0|toggle&minutes=15 (a Streamer.bot hotkey can call this)
+            on = g("on", "toggle").lower()
+            want = (not self.is_deaf()) if on in ("toggle", "") else on in ("1", "true", "on", "yes")
+            await self.deafen(want, _int(g("minutes")) or None, why=g("why", "dock"))
+            return {"ok": True, "deaf": self.is_deaf()}
+        elif kind == "forget":      # /api/forget?minutes=10: erase what was said lately, before he learns from it
+            mins = _int(g("minutes")) or self.cfg["deafen"].get("forget_minutes", 10)
+            n = self.sk.forget_since(time.time() - mins * 60)
+            log.info("Forgot the last %d minutes (%d lines)", mins, n)
+            return {"ok": True, "lines": n}
+        elif kind == "mission":     # /api/mission?do=ask|freeze|stage&n=1|realize
+            return self.sk.mission.api(p)
+        elif kind == "memory_delete":   # the control page's Memory panel
+            ok = self.sk.memory.delete_item(g("section"), g("key"), g("index", "-1"), str(p.get("text") or ""))
+            if ok:
+                self.sk.memory.dirty = True
+            return {"ok": ok}
         else:
             return None
         return {"ok": True}
@@ -706,7 +790,14 @@ class Features:
                 "race": bool(self.race), "away": bool(self.away), "role": self.role[0] if self.role else None,
                 "obs": bool(self.obs and self.obs.connected), "scene": self.scene,
                 "vision": self.cfg["vision"].get("enabled") and self.vision_ready(),
-                "voice_effects": self.effect_actions()}
+                "voice_effects": self.effect_actions(), "deaf": self.deaf_text()}
+
+    def deaf_text(self):
+        if not self.is_deaf():
+            return None
+        if self.deaf_until == float("inf"):
+            return "while this scene is on" if self.deaf_auto else "until you click"
+        return f"{int((self.deaf_until - time.time()) // 60) + 1} min left"
 
     def routes(self, app):
         page = os.path.join(BASE, "overlay", "games.html")
@@ -1322,7 +1413,7 @@ class Features:
             said_key = f"redeem_said_{user.lower()}"
             if self.cfg["events"].get("redeems", True) and now - self.recent.get(said_key, -999) > 30:
                 self.recent[said_key] = now
-                self.alert_task(f'{user} just redeemed "{title}" with channel points. React to it by name in one sentence.')
+                self.alert_task(f'{user} just redeemed "{title}" with channel points. React to it by name in one sentence.', "redeem")
             return
         kind = {"Raid": "raid", "Sub": "sub", "ReSub": "resub", "GiftSub": "gift", "GiftBomb": "giftbomb",
                 "Cheer": "cheer", "Follow": "follow"}.get(etype)
@@ -1375,7 +1466,7 @@ class Features:
                 + (f"They were just streaming {game}. " if game else "") + known +
                 " Thank them by name and welcome the raiders as a group. Be specific, not a generic thanks: mention "
                 "what they were streaming or what you remember about them, and tell the raiders what's going on "
-                "here right now. Two sentences, energy matched to the raid size.")
+                "here right now. Two sentences, energy matched to the raid size.", "raid")
             so = self.actions_with(self.cfg["events"].get("shoutout_keyword") or "shout")
             if so:
                 asyncio.create_task(self.run_action(so[0], user))
@@ -1384,23 +1475,23 @@ class Features:
         elif kind == "giftbomb":
             self.gift_bombs[user.lower()] = now
             self.alert_task(f"{user} just gifted {count or 'a bunch of'}{tier_txt} subs to chat!{known} Lose your mind about it "
-                      "for one or two sentences and thank them by name.")
+                      "for one or two sentences and thank them by name.", "gift")
             self.log_event(f"{user} gifted {count} subs")
             await self.avatar_do("sub", user, n=count)
         elif kind == "gift":
             self.alert_task(f"{user} just gifted a{tier_txt} sub to {recipient or 'someone in chat'}.{known} Thank the gifter and "
-                      "welcome the recipient, one sentence.")
+                      "welcome the recipient, one sentence.", "gift")
             self.log_event(f"{user} gifted a sub to {recipient}")
             await self.avatar_do("sub", user, n=1)
         elif kind in ("sub", "resub"):
             span = f"for {months} months" if months > 1 else "for the first time"
             self.alert_task(f"{user} just subscribed{tier_txt} {span}.{known} Say something about it, using their name, in one or two sentences; if "
-                      "you remember something about them, work it in. Milestones (6, 12, 24 months) deserve extra hype.")
+                      "you remember something about them, work it in. Milestones (6, 12, 24 months) deserve extra hype.", "sub")
             self.log_event(f"{user} subscribed{tier_txt} ({months or 1} months)")
             await self.avatar_do("sub", user, months=months or 1)
         elif kind == "cheer":
             self.alert_task(f"{user} just cheered {bits} bits.{known} React by name in one sentence, bigger hype for "
-                      "bigger amounts.")
+                      "bigger amounts.", "bits")
             self.log_event(f"{user} cheered {bits} bits")
             await self.avatar_do("bits", user, n=bits)
         elif kind == "follow":
@@ -1414,7 +1505,7 @@ class Features:
             names, self.follows = self.follows[:5], self.follows[5:]
             self.recent["follow_said"] = now
             self.alert_task(f"New follower{'s' if len(names) > 1 else ''}: {', '.join(names)}. Riff on it by name in one "
-                      "quick sentence.")
+                      "quick sentence.", "follow")
             asyncio.create_task(self.avatar_do("follow", ", ".join(names), n=len(names)))
 
     # ------------------------------------------------------------ clips and recaps
@@ -1505,6 +1596,11 @@ class Features:
             await self.sk.send_overlays({"type": "avatar", "set": {"acts": acts}})
             await self.sk.push_status()
             log.info("Gary's stream mode: %s", mode)
+        auto = self.cfg["deafen"].get("auto_scenes") or []
+        if mode in auto:
+            await self.deafen(True, auto=True, why=f"{mode} scene")
+        elif self.deaf_auto:
+            await self.deafen(False, auto=True, why=f"{mode} scene")
         role = next(((k, v) for k, v in self.cfg.get("roles", {}).items()
                      if re.search(rf"\b{re.escape(k.lower())}\b", low)), None)
         if role and (not self.role or self.role[0] != role[0]):
@@ -1531,10 +1627,23 @@ class Features:
         vc = self.cfg["vision"]
         if not vc.get("enabled") or not self.vision_ready() or not (self.obs and self.obs.connected):
             return None
+        try:
+            private = await self.obs.private_capture()
+        except Exception as e:
+            log.info("Couldn't check the scene's sources (%s), so no screen glance", e)
+            return None
+        if private:
+            log.info("[guard] No screen glance: the scene shows %s (desktop or a private window)", private)
+            return None
         brain = self.sk.brain
         for width in (960, 640):        # a payload-size error gets one retry at a smaller width
             try:
+                scene = self.obs.scene
                 img = await self.obs.screenshot(width)
+                # the scene could have switched to the desktop between the check and the shot: check again
+                if self.obs.scene != scene or await self.obs.private_capture():
+                    log.info("[guard] Scene changed during the screen glance; threw the screenshot away")
+                    return None
             except Exception as e:
                 self.warn_once("shot", "Couldn't grab a screenshot from OBS: %s", e)
                 return None
@@ -1607,6 +1716,8 @@ class Features:
         vc = self.cfg["vision"]
         if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.queued():
             return
+        if self.is_deaf():
+            return      # deafened usually means something private is going on: no looking either
         if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race or self.glancing:
             return
         self.last_glance = now
@@ -1714,6 +1825,7 @@ class Features:
                 if self.predict and not self.predict["locked"] and now >= self.predict["locks_at"]:
                     await self.lock_predict()
                 await self.quiet_tick(now)
+                await self.deaf_tick()
                 await self.trivia_tick(now)
                 await self.race_tick(now)
                 if not self.sk.paused:
