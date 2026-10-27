@@ -37,6 +37,36 @@ QUIET / PAUSE
 While muted he ignores chat but still reacts to follows, subs, bits, raids and redeems.
 
 
+DEAFEN (he can't hear your mic at all)
+--------------------------------------
+  Big red "Deafen Gary" button at the top of the OBS dock (click again to let him hear).
+  Dock / control page also have 5, 15 and 30 minute buttons.
+  "Gary, cover your ears" / "earmuffs" / "plug your ears"    deafens him for 15 minutes
+  "Gary, cover your ears for 30 minutes"                     that long (max 4 hours)
+  While deafened nothing you say is turned into text, logged or remembered. Chat still reaches him.
+  He can't hear you ask him to listen again: use the dock button, the control page, or a Streamer.bot
+  hotkey action that fetches  http://localhost:7777/api/deafen?on=toggle
+  BRB scenes deafen him on their own and undo it when you leave them.
+  It stays on after a restart or crash until you turn it off.
+  "Forget 10m" (dock) / "Forget last 10 min" (control page)   erases the last 10 minutes of what was
+                                                             said, before he learns anything from it
+
+
+GARY GROWING UP (his mission)
+-----------------------------
+He starts out knowing almost nothing: not what the stream is, not what chat is ("the Voices"), just
+that you're dum. He learns from what happens on stream, grows through 4 stages (Lost, Noticing, the
+big realization that he's ON a stream, Co-host) based on hours streamed and how much he remembers,
+and one day asks if he can run the stream himself. Every now and then (about every 20-30 minutes, at
+a quiet moment) he asks you a curious question about the stream, life or big ideas. Your next line is
+saved as what you taught him, and he brings it up later.
+  "Gary, stop talking about the dumpster"                    he drops that topic for good
+  "Gary, read your journal"                                  reads his diary entry from last stream
+  Dock card "Gary's mission": stage and progress, Let him ask, Freeze, Stage - / Stage +.
+  Control page: the same, plus "Realize he's on stream now" and a Memory panel where you can see and
+  delete anything he remembers.
+
+
 VOICE EFFECTS (on you, through Streamer.bot)
 --------------------------------------------
   "Gary, robot voice me" / "give me the helium voice" / "make me deep voice"
@@ -103,4 +133,5 @@ Scenes with "news" or "weather" as a word in the name make him the DUMSTREAM New
 TEST LINKS (paste in a browser while Gary is running)
 -----------------------------------------------------
   http://localhost:7777/api/do?name=raid&who=Bob&n=50       (raid, sub, bits, follow, hype, rip, redeem)
+  http://localhost:7777/api/deafen?on=toggle                deafen / undeafen (on=1, on=0, &minutes=15)
   http://localhost:7777/games/control                       buttons for polls, trivia, races, test events

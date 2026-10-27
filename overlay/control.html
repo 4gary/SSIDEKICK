@@ -32,6 +32,13 @@
   .act { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .act span { flex: 1; } .act input { flex: 0 0 auto; min-width: 0; width: 16px; height: 16px; accent-color: var(--accent); }
   .act button { padding: 4px 9px; font-size: 12px; }
+  #deaf.isdeaf { background: var(--bad); }
+  .mem { display: grid; gap: 4px; max-height: 380px; overflow-y: auto; }
+  .mem div { display: flex; gap: 8px; align-items: flex-start; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; }
+  .mem div span { flex: 1; } .mem div b { color: var(--muted); font-weight: 600; min-width: 90px; }
+  .mem button { padding: 2px 8px; font-size: 12px; background: transparent; border: 1px solid var(--line); color: var(--bad); }
+  .bar { height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin: 6px 0; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); }
 </style>
 </head>
 <body>
@@ -40,6 +47,28 @@
     <button class="ghost" id="pause" data-confirm="Click again to pause">Pause</button><button class="ghost" id="skip">Skip line</button><button class="ghost" id="refresh">Refresh</button></div>
   <div class="card row" id="status"><span class="pill">Sidekick: <b class="muted">connecting...</b></span></div>
   <div id="hint" style="display:none"></div>
+  <div class="card">
+    <label>Deafen: Gary can't hear your mic at all (nothing is transcribed or remembered). Chat still reaches him.</label>
+    <div class="row">
+      <button id="deaf">Deafen Gary</button>
+      <button class="ghost" data-deaf="5">5 min</button><button class="ghost" data-deaf="15">15 min</button><button class="ghost" data-deaf="30">30 min</button>
+      <span style="flex:1"></span>
+      <button class="ghost" id="forget" data-confirm="Click again to erase">Forget last 10 min</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">"Gary, cover your ears" deafens him by voice. Turning it off is this button, the dock, or a Streamer.bot hotkey that fetches http://localhost:7777/api/deafen?on=toggle. BRB, Starting and Ending deafen him on their own. Forget erases what was said in the last 10 minutes before he can learn from it.</div>
+  </div>
+  <div class="card">
+    <label>Gary's mission: growing up on stream</label>
+    <div id="misStage" style="font-weight:600">...</div>
+    <div class="bar"><i id="misBar"></i></div>
+    <div id="misInfo" style="font-size:13px;color:var(--muted)"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" data-mis="ask">Let him ask a question</button>
+      <button class="ghost" data-mis="freeze" id="misFreeze">Freeze growth</button>
+      <button class="ghost" data-mis="stage" data-n="-1">Stage -</button><button class="ghost" data-mis="stage" data-n="1">Stage +</button>
+      <button class="ghost" data-mis="realize" data-confirm="Click again: he realizes now">Realize he's on stream now</button>
+    </div>
+  </div>
   <div class="card">
     <label>Talk to the sidekick as yourself (this can trigger Streamer.bot actions)</label>
     <form class="row" id="fStreamer"><input id="streamer" placeholder="Gary, what do you think of this boss?" autocomplete="off"><button>Send</button></form>
@@ -97,6 +126,10 @@
     <div style="font-size:12px;color:var(--muted);margin-top:8px">These only play the animation and sound on the overlay. Gary won't say anything.</div>
     <div class="row" style="margin-top:8px"><span style="font-size:12px;color:var(--muted)">Full alert, he talks too (the same path a real one takes):</span>
       <button class="ghost" data-alert="raid">Raid</button><button class="ghost" data-alert="sub">Sub</button><button class="ghost" data-alert="bits">Bits</button><button class="ghost" data-alert="follow">Follow</button></div>
+  </div>
+  <div class="card">
+    <div class="row"><label style="margin:0">What Gary remembers (delete anything that shouldn't be there)</label><span style="flex:1"></span><button class="ghost" id="memLoad">Load / refresh</button></div>
+    <div class="mem" id="mem" style="margin-top:8px"><span class="muted" style="font-size:13px">Press Load to see it.</span></div>
   </div>
   <div class="card"><label>Log</label><div id="log"></div></div>
 </main>
@@ -223,11 +256,65 @@ function renderStatus(m) {
     "obs" in f ? pill("OBS", f.obs ? "ok" : "bad", f.obs ? "connected" : "not connected") : "",
   ].join("");
   if (m.avatar) applyAvatar(m.avatar);
+  renderMission(m.mission, f);
 }
+
+// ---- deafen, mission, memory panel
+let deaf = false;
+const apiCall = (kind, q) => fetch(`/api/${kind}${q ? "?" + q : ""}`).then(r => r.json()).catch(() => ({ ok: false }));
+$("deaf").onclick = () => apiCall("deafen", "on=" + (deaf ? "0" : "1"));
+document.querySelectorAll("[data-deaf]").forEach(b => b.onclick = () => apiCall("deafen", "on=1&minutes=" + b.dataset.deaf));
+function confirmThen(b, fn) {
+  if (b._t) { clearTimeout(b._t); b._t = 0; b.classList.remove("armed"); b.textContent = b._label; fn(); return; }
+  b._label = b.textContent; b.textContent = b.dataset.confirm; b.classList.add("armed");
+  b._t = setTimeout(() => { b._t = 0; b.classList.remove("armed"); b.textContent = b._label; }, 3000);
+}
+$("forget").onclick = e => confirmThen(e.target, () => apiCall("forget").then(j => hint(j.ok ? `Forgot ${j.lines} lines` : "Forget failed")));
+document.querySelectorAll("[data-mis]").forEach(b => b.onclick = () => {
+  const go = () => apiCall("mission", "do=" + b.dataset.mis + (b.dataset.n ? "&n=" + b.dataset.n : ""))
+    .then(j => { if (!j.ok) hint(b.dataset.mis === "realize" ? "He already knows he's on stream" : "That didn't work"); });
+  if (b.dataset.confirm) confirmThen(b, go); else go();
+});
+function renderMission(ms, f) {
+  deaf = !!f.deaf;
+  $("deaf").classList.toggle("isdeaf", deaf);
+  $("deaf").textContent = deaf ? `GARY CAN'T HEAR YOU (${f.deaf}). Click to let him hear` : "Deafen Gary";
+  if (!ms || !ms.on) { $("misStage").textContent = "Mission is off (config.toml [mission] enabled)"; return; }
+  $("misStage").textContent = `Stage ${ms.stage}: ${ms.name}` + (ms.close ? " (close to realizing he's on stream)" : "") + (ms.frozen ? " (frozen)" : "");
+  $("misBar").style.width = Math.round((ms.progress || 0) * 100) + "%";
+  $("misInfo").textContent = `${ms.label}. ${ms.hours} hours streamed, ${ms.memories} memories.` + (ms.asks ? ` Asked to run the stream ${ms.asks} times.` : "") + (ms.test ? " TEST MODE: nothing counts." : "");
+  $("misFreeze").textContent = ms.frozen ? "Unfreeze growth" : "Freeze growth";
+}
+let memRows = [];
+function memLoad() {
+  fetch("/memory").then(r => r.json()).then(d => {
+    memRows = [];
+    for (const [key, p] of Object.entries(d.people || {}))
+      (p.facts || []).forEach((t, i) => memRows.push({ label: p.name || key, text: t, section: "people", key, index: i }));
+    (d.lore || []).forEach((l, i) => memRows.push({ label: "Lore", text: l.text, section: "lore", index: i }));
+    (d.streams || []).forEach((st, i) => memRows.push({ label: "Stream " + st.date, text: st.summary, section: "streams", index: i }));
+    const me = d.self || {};
+    (me.notes || []).forEach((n, i) => memRows.push({ label: "His notes", text: n.text, section: "notes", index: i }));
+    (me.answers || []).forEach((a, i) => memRows.push({ label: "You taught", text: `${a.q} -> ${a.a}`, section: "answers", index: i }));
+    (me.likes || []).forEach((n, i) => memRows.push({ label: "He likes", text: n.text, section: "likes", index: i }));
+    (me.dropped || []).forEach((n, i) => memRows.push({ label: "Dropped topic", text: n.topic, section: "dropped", index: i }));
+    $("mem").innerHTML = memRows.length ? memRows.map((r, n) => `<div><b>${esc(r.label)}</b><span>${esc(r.text)}</span><button data-row="${n}">Delete</button></div>`).join("")
+      : `<span class="muted" style="font-size:13px">He doesn't remember anything yet.</span>`;
+  }).catch(() => hint("Couldn't load memory"));
+}
+$("memLoad").onclick = memLoad;
+$("mem").onclick = e => {
+  const b = e.target.closest("button[data-row]");
+  if (!b) return;
+  const r = memRows[Number(b.dataset.row)];
+  apiCall("memory_delete", `section=${r.section}&key=${encodeURIComponent(r.key || "")}&index=${r.index}&text=${encodeURIComponent(r.text)}`)
+    .then(j => { if (!j.ok) hint("Couldn't delete that (it may have changed): reload and try again"); memLoad(); });
+};
+
 function addLog(line) {
   const el = $("log"), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
   const d = document.createElement("div");
-  if (line.includes(" says: ")) d.className = "say";
+  if (/ says( \(deep\))?: /.test(line)) d.className = "say";
   d.textContent = line;
   el.appendChild(d);
   while (el.childNodes.length > 400) el.removeChild(el.firstChild);

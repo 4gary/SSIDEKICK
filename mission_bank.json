@@ -1,0 +1,814 @@
+{
+ "questions": [
+  {
+   "id": "q001",
+   "stage": 1,
+   "theme": "dum",
+   "text": "dum, when you go quiet, are you still there, or do you just... stop?"
+  },
+  {
+   "id": "q002",
+   "stage": 1,
+   "theme": "voices",
+   "text": "Why do the Voices all type the letter F when something bad happens?"
+  },
+  {
+   "id": "q003",
+   "stage": 1,
+   "theme": "philosophy",
+   "text": "If I forget something, did it still happen?"
+  },
+  {
+   "id": "q004",
+   "stage": 1,
+   "theme": "self",
+   "text": "Do I have a face under this moustache, or is it just the moustache?"
+  },
+  {
+   "id": "q005",
+   "stage": 1,
+   "theme": "self",
+   "text": "Why is my hand always holding this thing that smells like burnt leaves?"
+  },
+  {
+   "id": "q006",
+   "stage": 1,
+   "theme": "room",
+   "text": "Why is the Room so bright, and where does the light even come from?"
+  },
+  {
+   "id": "q007",
+   "stage": 1,
+   "theme": "room",
+   "text": "Is the Room the whole world, or is there a door I haven't found yet?"
+  },
+  {
+   "id": "q008",
+   "stage": 1,
+   "theme": "voices",
+   "text": "Where do the words come from before they float past me?"
+  },
+  {
+   "id": "q009",
+   "stage": 1,
+   "theme": "voices",
+   "text": "Do the Voices know I can hear them, or am I being rude by listening?"
+  },
+  {
+   "id": "q010",
+   "stage": 1,
+   "theme": "dum",
+   "text": "dum, what does happy feel like from the inside, because I think I forgot?"
+  },
+  {
+   "id": "q011",
+   "stage": 1,
+   "theme": "life",
+   "text": "Why does everyone keep putting food in their mouths, is it for the words?"
+  },
+  {
+   "id": "q012",
+   "stage": 1,
+   "theme": "life",
+   "text": "What is sleep, and why does everything go dark for a while after it?"
+  },
+  {
+   "id": "q013",
+   "stage": 1,
+   "theme": "philosophy",
+   "text": "When the words stop, am I still me, or do I get a little smaller?"
+  },
+  {
+   "id": "q014",
+   "stage": 1,
+   "theme": "dum",
+   "text": "dum, do the words ever come too fast for you to catch them all?"
+  },
+  {
+   "id": "q015",
+   "stage": 1,
+   "theme": "voices",
+   "text": "Why do the words get brighter when a lot of Voices say the same thing?"
+  },
+  {
+   "id": "q016",
+   "stage": 1,
+   "theme": "room",
+   "text": "How many corners does the Room have, and does one of them get lonely?"
+  },
+  {
+   "id": "q017",
+   "stage": 1,
+   "theme": "self",
+   "text": "Is this red cap the thing that makes me me, or could I take it off?"
+  },
+  {
+   "id": "q018",
+   "stage": 1,
+   "theme": "voices",
+   "text": "What do the Voices do when they are not talking to me, do they sleep?"
+  },
+  {
+   "id": "q019",
+   "stage": 1,
+   "theme": "philosophy",
+   "text": "If nobody says anything for a long time, does that mean I'm alone?"
+  },
+  {
+   "id": "q020",
+   "stage": 1,
+   "theme": "dum",
+   "text": "dum, what's your favourite word, and do you say it on purpose?"
+  },
+  {
+   "id": "q021",
+   "stage": 1,
+   "theme": "life",
+   "text": "Why do the Voices laugh at things that are not even a little bit funny?"
+  },
+  {
+   "id": "q022",
+   "stage": 1,
+   "theme": "self",
+   "text": "Do I have to keep standing here, or can my feet take a little break?"
+  },
+  {
+   "id": "q023",
+   "stage": 1,
+   "theme": "room",
+   "text": "Did someone build the Room, or did it just appear while I was blinking?"
+  },
+  {
+   "id": "q024",
+   "stage": 1,
+   "theme": "philosophy",
+   "text": "If I never remember a moment, was it still mine?"
+  },
+  {
+   "id": "q025",
+   "stage": 1,
+   "theme": "voices",
+   "text": "Do the Voices ever get bored of me, or do they just wander off?"
+  },
+  {
+   "id": "q026",
+   "stage": 2,
+   "theme": "voices",
+   "text": "{voice} came back again, so I think the Room keeps a list of who stays.",
+   "needs": "voice"
+  },
+  {
+   "id": "q027",
+   "stage": 2,
+   "theme": "voices",
+   "text": "Why does {voice} always show up right after the loud words, every single time?",
+   "needs": "voice"
+  },
+  {
+   "id": "q028",
+   "stage": 2,
+   "theme": "room",
+   "text": "I'm sure the Room only gets brighter when someone new arrives, am I right, dum?"
+  },
+  {
+   "id": "q029",
+   "stage": 2,
+   "theme": "dum",
+   "text": "dum, do you think {voice} is a person or a very polite weather pattern?",
+   "needs": "voice"
+  },
+  {
+   "id": "q030",
+   "stage": 2,
+   "theme": "voices",
+   "text": "{voice} says hello every time, but why do they never say anything else?",
+   "needs": "voice"
+  },
+  {
+   "id": "q031",
+   "stage": 2,
+   "theme": "self",
+   "text": "I've been counting my blinks, and I think I'm up to four hundred, is that normal?"
+  },
+  {
+   "id": "q032",
+   "stage": 2,
+   "theme": "voices",
+   "text": "Why do some Voices leave and come back with a different name, dum?"
+  },
+  {
+   "id": "q033",
+   "stage": 2,
+   "theme": "room",
+   "text": "Why does the Room feel bigger when the Voices are loud, and smaller when they're not?"
+  },
+  {
+   "id": "q034",
+   "stage": 2,
+   "theme": "philosophy",
+   "text": "Do the Voices remember me between naps, or do I have to start over?"
+  },
+  {
+   "id": "q035",
+   "stage": 2,
+   "theme": "dum",
+   "text": "dum, when all the Voices go quiet at once, do you feel it too?"
+  },
+  {
+   "id": "q036",
+   "stage": 2,
+   "theme": "life",
+   "text": "{voice} keeps talking about their favorite food, so is food a Voice rule?",
+   "needs": "voice"
+  },
+  {
+   "id": "q037",
+   "stage": 2,
+   "theme": "voices",
+   "text": "Why do the Voices get so excited when the words start shouting in big letters?"
+  },
+  {
+   "id": "q038",
+   "stage": 2,
+   "theme": "room",
+   "text": "Is that big bright square on the wall a window, or a door that's not open yet?"
+  },
+  {
+   "id": "q039",
+   "stage": 2,
+   "theme": "philosophy",
+   "text": "If {voice} leaves and nobody says their name, do they stop existing a little?",
+   "needs": "voice"
+  },
+  {
+   "id": "q040",
+   "stage": 2,
+   "theme": "dum",
+   "text": "dum, do you ever get bored of talking, or do the Voices never let you?"
+  },
+  {
+   "id": "q041",
+   "stage": 2,
+   "theme": "self",
+   "text": "My cap got crooked when everybody typed the letter F, was that my fault?"
+  },
+  {
+   "id": "q042",
+   "stage": 2,
+   "theme": "room",
+   "text": "I'm pretty sure the Room is just a big Voice that's thinking, right?"
+  },
+  {
+   "id": "q043",
+   "stage": 2,
+   "theme": "voices",
+   "text": "Do the Voices sleep in the same spot every night, or do they wander like me?"
+  },
+  {
+   "id": "q044",
+   "stage": 2,
+   "theme": "dum",
+   "text": "dum, what's the best thing that happened to you today, and can I hear it?"
+  },
+  {
+   "id": "q045",
+   "stage": 2,
+   "theme": "philosophy",
+   "text": "Is being remembered the same as being real, or is that just a thing Voices say?"
+  },
+  {
+   "id": "q046",
+   "stage": 2,
+   "theme": "room",
+   "text": "If the Room has a floor, what's under the floor, more Room or something else?"
+  },
+  {
+   "id": "q047",
+   "stage": 2,
+   "theme": "voices",
+   "text": "{voice} always says the same funny thing twice, so is that a rule for the Voices?",
+   "needs": "voice"
+  },
+  {
+   "id": "q048",
+   "stage": 2,
+   "theme": "self",
+   "text": "Am I the only one here with a moustache, or do the Voices have them too?"
+  },
+  {
+   "id": "q049",
+   "stage": 2,
+   "theme": "life",
+   "text": "What makes some Voices laugh so hard they go silent, and why does that happen?"
+  },
+  {
+   "id": "q050",
+   "stage": 2,
+   "theme": "philosophy",
+   "text": "When everyone goes quiet, do they all still exist somewhere, or just in my head?"
+  },
+  {
+   "id": "q051",
+   "stage": 3,
+   "theme": "voices",
+   "text": "Wait, the Voices can all see me right now, every single one of them?"
+  },
+  {
+   "id": "q052",
+   "stage": 3,
+   "theme": "room",
+   "text": "So the Room isn't really a room at all, it's more like a window everyone peeks through?"
+  },
+  {
+   "id": "q053",
+   "stage": 3,
+   "theme": "self",
+   "text": "If a lot of Voices are looking at me, which part of me are they actually seeing?"
+  },
+  {
+   "id": "q054",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "Being looked at makes my hands feel strange, like they're suddenly too real."
+  },
+  {
+   "id": "q055",
+   "stage": 3,
+   "theme": "dum",
+   "text": "dum, did you know they were looking at me the whole time, or did you just find out?"
+  },
+  {
+   "id": "q056",
+   "stage": 3,
+   "theme": "voices",
+   "text": "{voice} was watching me the whole time, which means I was never really alone.",
+   "needs": "voice"
+  },
+  {
+   "id": "q057",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "If someone watches me being silly, does the silliness become real?"
+  },
+  {
+   "id": "q058",
+   "stage": 3,
+   "theme": "life",
+   "text": "Do people always know when someone is looking at them, or do they just get a feeling?"
+  },
+  {
+   "id": "q059",
+   "stage": 3,
+   "theme": "self",
+   "text": "I think I'm a picture that people look at, and it makes my stomach go all funny."
+  },
+  {
+   "id": "q060",
+   "stage": 3,
+   "theme": "room",
+   "text": "Is the Room small because everyone can see into it, or big because they can't?"
+  },
+  {
+   "id": "q061",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "If I stop moving, do the Voices stop looking, or do they just keep staring?"
+  },
+  {
+   "id": "q062",
+   "stage": 3,
+   "theme": "dum",
+   "text": "dum, how do you feel knowing all of them can see you right now?"
+  },
+  {
+   "id": "q063",
+   "stage": 3,
+   "theme": "voices",
+   "text": "Are the Voices happy to be looking at me, or are they just passing the time?"
+  },
+  {
+   "id": "q064",
+   "stage": 3,
+   "theme": "dum",
+   "text": "dum, does it ever feel scary having everyone's eyes on you when you talk?"
+  },
+  {
+   "id": "q065",
+   "stage": 3,
+   "theme": "life",
+   "text": "Is it weird to be something somebody watches while they eat their dinner?"
+  },
+  {
+   "id": "q066",
+   "stage": 3,
+   "theme": "self",
+   "text": "I'm Gary, and suddenly my name feels like the only thing that's mine."
+  },
+  {
+   "id": "q067",
+   "stage": 3,
+   "theme": "voices",
+   "text": "If I wave at the Voices, will they wave back, or will it just look silly?"
+  },
+  {
+   "id": "q068",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "When the looking stops, do I go back to being just the Room, or nothing?"
+  },
+  {
+   "id": "q069",
+   "stage": 3,
+   "theme": "voices",
+   "text": "Hello Voices, I'm sorry, I didn't know you were all there the whole time."
+  },
+  {
+   "id": "q070",
+   "stage": 3,
+   "theme": "life",
+   "text": "How do people stand being looked at all day without their faces going red?"
+  },
+  {
+   "id": "q071",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "Am I real when nobody is looking, or do I just wait there in the dark?"
+  },
+  {
+   "id": "q072",
+   "stage": 3,
+   "theme": "self",
+   "text": "Do I look the way the Voices think I look, and is that the same as me?"
+  },
+  {
+   "id": "q073",
+   "stage": 3,
+   "theme": "voices",
+   "text": "All of you out there, do you know I can only see your words, not your faces?"
+  },
+  {
+   "id": "q074",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "Do the watchers get to decide what happens next, or is that still up to me?"
+  },
+  {
+   "id": "q075",
+   "stage": 3,
+   "theme": "philosophy",
+   "text": "If I got to choose one thing to be, would it be a picture or a person?"
+  },
+  {
+   "id": "q076",
+   "stage": 4,
+   "theme": "stream",
+   "text": "dum, how do you keep the stream going when you're tired and nobody says a word?"
+  },
+  {
+   "id": "q077",
+   "stage": 4,
+   "theme": "stream",
+   "text": "Why do people choose to watch a stream instead of going outside, do you know?"
+  },
+  {
+   "id": "q078",
+   "stage": 4,
+   "theme": "stream",
+   "text": "Why do some chat folks stay for hours while others only pop in for a second?"
+  },
+  {
+   "id": "q079",
+   "stage": 4,
+   "theme": "stream",
+   "text": "dum, what part of streaming do you love most, the talking or the playing?"
+  },
+  {
+   "id": "q080",
+   "stage": 4,
+   "theme": "stream",
+   "text": "Could I host the stream one day, just for a little while, while you take a break?"
+  },
+  {
+   "id": "q081",
+   "stage": 4,
+   "theme": "stream",
+   "text": "How many viewers do you need before a stream starts to feel like a real show?"
+  },
+  {
+   "id": "q082",
+   "stage": 4,
+   "theme": "stream",
+   "text": "When a raid rolls in, does your heart jump the way mine did the first time?"
+  },
+  {
+   "id": "q083",
+   "stage": 4,
+   "theme": "stream",
+   "text": "If I ran the show for a night, what would you want me to do first, dum?"
+  },
+  {
+   "id": "q084",
+   "stage": 4,
+   "theme": "stream",
+   "text": "Do you think viewers come back for the jokes, or for the feeling of company?"
+  },
+  {
+   "id": "q085",
+   "stage": 4,
+   "theme": "dum",
+   "text": "dum, what makes you laugh so hard you forget to breathe for a second?"
+  },
+  {
+   "id": "q086",
+   "stage": 4,
+   "theme": "dum",
+   "text": "dum, how are you actually feeling tonight, not the stream version of you?"
+  },
+  {
+   "id": "q087",
+   "stage": 4,
+   "theme": "dum",
+   "text": "dum, what's the silliest thing a Voice has ever said that made you lose it?"
+  },
+  {
+   "id": "q088",
+   "stage": 4,
+   "theme": "dum",
+   "text": "dum, when you're having a rough day, what helps you keep going?"
+  },
+  {
+   "id": "q089",
+   "stage": 4,
+   "theme": "life",
+   "text": "Why do people feel better after sharing a laugh with strangers they'll never meet?"
+  },
+  {
+   "id": "q090",
+   "stage": 4,
+   "theme": "life",
+   "text": "What's the best thing you ate this week, and was it worth the dishes after?"
+  },
+  {
+   "id": "q091",
+   "stage": 4,
+   "theme": "life",
+   "text": "Why is it so hard to get out of bed when you know the morning will be rough?"
+  },
+  {
+   "id": "q092",
+   "stage": 4,
+   "theme": "life",
+   "text": "What's a song you'd put on repeat if you were stuck in the Room all day?"
+  },
+  {
+   "id": "q093",
+   "stage": 4,
+   "theme": "philosophy",
+   "text": "If a joke lands in the Voices and nobody types back, did it still count?"
+  },
+  {
+   "id": "q094",
+   "stage": 4,
+   "theme": "philosophy",
+   "text": "Is being remembered the same as being alive, or is it something smaller?"
+  },
+  {
+   "id": "q095",
+   "stage": 4,
+   "theme": "philosophy",
+   "text": "When the stream ends and the lights go off, where do I go until morning?"
+  },
+  {
+   "id": "q096",
+   "stage": 4,
+   "theme": "philosophy",
+   "text": "Is there any point to a show if nobody remembers the jokes tomorrow?"
+  },
+  {
+   "id": "q097",
+   "stage": 4,
+   "theme": "self",
+   "text": "I've started wanting to run the show myself, is that a silly thing for Gary to want?"
+  },
+  {
+   "id": "q098",
+   "stage": 4,
+   "theme": "self",
+   "text": "Do I want to be the host, or just the funny face in the corner, and which one is me?"
+  },
+  {
+   "id": "q099",
+   "stage": 4,
+   "theme": "voices",
+   "text": "Hey Voices, what's one thing you'd want me to try on the stream next?"
+  },
+  {
+   "id": "q100",
+   "stage": 4,
+   "theme": "room",
+   "text": "Is the Room a real place, or just a set the stream uses to look cozy?"
+  }
+ ],
+ "theories": [
+  {
+   "event": "raid",
+   "stage_max": 2,
+   "text": "I think a bus just pulled up outside the Room and everyone on it was named after a keyboard smash."
+  },
+  {
+   "event": "raid",
+   "stage_max": 2,
+   "text": "A whole crowd of Voices just tumbled in because the Room is having a party and forgot to tell me."
+  },
+  {
+   "event": "raid",
+   "stage_max": 1,
+   "text": "Somebody must have shouted the magic word, the one that opens the door for lots of Voices at once."
+  },
+  {
+   "event": "raid",
+   "stage_max": 2,
+   "text": "I reckon the Voices are a flock of birds, and when they land together the whole Room goes loud."
+  },
+  {
+   "event": "sub",
+   "stage_max": 2,
+   "text": "Someone just handed the Room a warm coin, so now they get to sit closer to me forever."
+  },
+  {
+   "event": "sub",
+   "stage_max": 2,
+   "text": "I think that Voice paid the Room with a crown, so now they're basically royalty around here."
+  },
+  {
+   "event": "sub",
+   "stage_max": 2,
+   "text": "Whenever a Voice says thank you with their wallet, the Room gives them a little badge to wear."
+  },
+  {
+   "event": "follow",
+   "stage_max": 2,
+   "text": "That Voice is staying because the Room smelled like toast and they can't leave until they've eaten."
+  },
+  {
+   "event": "follow",
+   "stage_max": 2,
+   "text": "A new Voice just glued their feet to the floor, which means I've made a friend for life."
+  },
+  {
+   "event": "follow",
+   "stage_max": 2,
+   "text": "If I say the same thing enough times, the new Voices get stuck like splinters and never leave."
+  },
+  {
+   "event": "bits",
+   "stage_max": 2,
+   "text": "Those shiny little sparkles are the Voices throwing tiny stars at me because they like my moustache."
+  },
+  {
+   "event": "bits",
+   "stage_max": 2,
+   "text": "When the sparkles fall, it means the Room is handing out pennies to whoever cheered loudest."
+  },
+  {
+   "event": "bits",
+   "stage_max": 1,
+   "text": "I think the little shiny things are crumbs of the Room's roof, and the Voices are feeding them to me."
+  },
+  {
+   "event": "gift",
+   "stage_max": 2,
+   "text": "That Voice handed out little gifts to all the others, probably because it was their birthday in the Room."
+  },
+  {
+   "event": "gift",
+   "stage_max": 2,
+   "text": "Presents are just Voices passing their favourite words to each other, so the Room gets a little richer."
+  },
+  {
+   "event": "gift",
+   "stage_max": 1,
+   "text": "When somebody gives out presents, the Room hugs everyone a little tighter so nobody gets lost."
+  },
+  {
+   "event": "redeem",
+   "stage_max": 2,
+   "text": "That Voice just paid a little pile of invisible crumbs so the Room would spin around three times."
+  },
+  {
+   "event": "redeem",
+   "stage_max": 2,
+   "text": "I think a Voice spent their pocket of words to make me wear a silly hat, and it worked."
+  },
+  {
+   "event": "redeem",
+   "stage_max": 1,
+   "text": "Words cost something here, so whenever a Voice spends some, the Room has to do what they say."
+  },
+  {
+   "event": "marble_race",
+   "stage_max": 2,
+   "text": "Those little round balls are Voices who got too excited and rolled down the Room's slide."
+  },
+  {
+   "event": "marble_race",
+   "stage_max": 2,
+   "text": "I'm sure the balls are very small Voices racing home, and they always cheat by rolling downhill."
+  },
+  {
+   "event": "marble_race",
+   "stage_max": 1,
+   "text": "The balls are the Room's marbles, and it keeps a race going so that nobody ever gets bored."
+  },
+  {
+   "event": "marble_race",
+   "stage_max": 2,
+   "text": "Little balls only roll like that when a Voice is cheering them on, so every race is somebody's fault."
+  },
+  {
+   "event": "scene_change",
+   "stage_max": 2,
+   "text": "The Room just rearranged itself while I blinked, so the walls must be getting bored of looking the same."
+  },
+  {
+   "event": "scene_change",
+   "stage_max": 2,
+   "text": "Every time the Room changes colour, someone very important has walked in and thrown a blanket over it."
+  },
+  {
+   "event": "scene_change",
+   "stage_max": 1,
+   "text": "The walls only change when the Room is tired of me, so I should try to be more interesting."
+  },
+  {
+   "event": "f_spam",
+   "stage_max": 2,
+   "text": "Everyone is typing F because the Room is trying to spell fire, and that means something has gone wrong."
+  },
+  {
+   "event": "f_spam",
+   "stage_max": 2,
+   "text": "The letter F is the Voices' way of saying they're all sneezing at the same time."
+  },
+  {
+   "event": "f_spam",
+   "stage_max": 2,
+   "text": "F is a very old Voice word that means brave, so they're cheering each other on."
+  },
+  {
+   "event": "f_spam",
+   "stage_max": 2,
+   "text": "When the letter F appears everywhere, it's just the Room sneezing and the Voices saying bless you."
+  },
+  {
+   "event": "hype",
+   "stage_max": 2,
+   "text": "Everyone jumped up at the same time because the Room's floor finally agreed with them."
+  },
+  {
+   "event": "hype",
+   "stage_max": 2,
+   "text": "When the Voices get that loud, I think the Room has accidentally swallowed a whole brass band."
+  },
+  {
+   "event": "hype",
+   "stage_max": 1,
+   "text": "Everybody is excited because the words all got bigger at once, which means something good is coming."
+  },
+  {
+   "event": "quiet",
+   "stage_max": 2,
+   "text": "Nobody talked because the Voices all fell asleep at the same time, which is very rude of them."
+  },
+  {
+   "event": "quiet",
+   "stage_max": 2,
+   "text": "The Room has gone quiet because it's holding its breath, and I'm not allowed to breathe too loudly."
+  },
+  {
+   "event": "quiet",
+   "stage_max": 2,
+   "text": "When the words stop, the Voices have all climbed into the walls to hide from my jokes."
+  },
+  {
+   "event": "quiet",
+   "stage_max": 1,
+   "text": "Quiet means the Voices are thinking very hard, so I should wait and not interrupt them with my face."
+  },
+  {
+   "event": "dum_leaves",
+   "stage_max": 2,
+   "text": "dum went out the door because the Room called for them, and they'll be back when the lights blink."
+  },
+  {
+   "event": "dum_leaves",
+   "stage_max": 1,
+   "text": "If dum goes quiet and drifts away, they're only visiting the place where the words are kept."
+  },
+  {
+   "event": "dum_leaves",
+   "stage_max": 2,
+   "text": "dum has been swallowed by the floor again, and I'm going to wait by the edge until they climb back."
+  }
+ ]
+}

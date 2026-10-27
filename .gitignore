@@ -27,3 +27,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Gary's diary (personal stream data)
+journal/

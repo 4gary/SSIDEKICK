@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 
 import aiohttp
@@ -133,6 +134,49 @@ class OBS:
             return await asyncio.wait_for(fut, timeout)
         finally:
             self.pending.pop(rid, None)
+
+    # windows that are never stream content: Gary must not look at these even if they're in a scene
+    PRIVATE_WINDOWS = re.compile(r"explorer|chrome|firefox|msedge|opera|brave|discord|notepad|code\.exe|cmd\.exe|"
+                                 r"powershell|windowsterminal|lm studio|streamer\.bot|obs64|telegram|whatsapp|"
+                                 r"outlook|thunderbird|steam\.exe|settings|sidekick|python|zoom|teams|slack|spotify|"
+                                 r"signal|1password|bitwarden|keepass|lastpass|mail|messenger|skype|facetime", re.I)
+
+    async def private_capture(self, scene=None, depth=0, group=False):
+        """The name of a live (visible) source in the program scene that shows the desktop or a private window, or
+        None. 2026-10-27: Gary only looks at the screen when it's showing stream content, never dum's desktop."""
+        if depth > 3:
+            return None
+        if scene is None:
+            if not self.scene:
+                res = await self.request("GetCurrentProgramScene")
+                self.scene = res.get("currentProgramSceneName") or res.get("sceneName") or ""
+            scene = self.scene
+        res = await self.request("GetGroupSceneItemList" if group else "GetSceneItemList", {"sceneName": scene})
+        for item in res.get("sceneItems", []):
+            if not item.get("sceneItemEnabled", True):
+                continue
+            kind, name = item.get("inputKind") or "", item.get("sourceName") or ""
+            if kind in ("monitor_capture", "display_capture", "xshm_input", "screen_capture"):
+                return name
+            if kind == "window_capture":
+                try:
+                    st = (await self.request("GetInputSettings", {"inputName": name})).get("inputSettings", {})
+                except Exception:
+                    return name     # can't tell what window it is: play it safe
+                if self.PRIVATE_WINDOWS.search(str(st.get("window", ""))):
+                    return name
+            if item.get("isGroup"):
+                try:
+                    found = await self.private_capture(name, depth + 1, group=True)
+                except Exception:
+                    return name     # can't see inside the group: play it safe
+                if found:
+                    return found
+            elif item.get("sourceType") == "OBS_SOURCE_TYPE_SCENE":
+                found = await self.private_capture(name, depth + 1)
+                if found:
+                    return found
+        return None
 
     async def screenshot(self, width=960):
         """JPEG of what's live on stream right now, as a data: URL."""

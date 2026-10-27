@@ -27,10 +27,12 @@ from urllib.parse import urlsplit
 import aiohttp
 from aiohttp import web
 
-from brain import Brain
+import guard
+from brain import Brain, wants_deep
 from connections import StreamerBot, twitch_chat
 from features import Features
 from memory import Memory
+from mission import Mission
 from tts import TTS, wav_seconds
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +70,8 @@ async def no_cache(request, handler):
 def foreign_origin(request):
     """True when a web page from another site is calling us. Browsers say so in the Origin header; Streamer.bot,
     curl and the OBS overlay (which is served by this app) either send no Origin or send localhost."""
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        return True     # a plain link or image on some website pointing at /api/... sends no Origin, but says this
     origin = request.headers.get("Origin")
     return bool(origin) and (urlsplit(origin).hostname or "") not in ("localhost", "127.0.0.1")
 
@@ -88,6 +92,7 @@ class Sidekick:
         self.bot = cfg["bot"]
         self.beh = cfg["behavior"]
         self.transcript = collections.deque(maxlen=self.beh.get("history_lines", 30))
+        self.line_times = collections.deque(maxlen=self.transcript.maxlen)   # when each transcript line was said
         self.jobs = collections.deque(maxlen=6)
         self.alerts = collections.deque(maxlen=8)   # follows, raids, subs... they go first, in the order they happened
         self.want_chat = False
@@ -113,12 +118,29 @@ class Sidekick:
         saved = getattr(self.features, "saved_avatar", None)   # avatar settings kept across restarts, if features.py has them
         if isinstance(saved, dict):
             deep_merge(self.avatar, {k: v for k, v in saved.items() if k != "do"})
+        self.mission = Mission(self, cfg)   # Gary growing up: stages, curious questions, his notes (mission.py)
 
     # ------------------------------------------------------------ inputs
 
     def remember(self, who, text, kind="chat"):
         self.transcript.append(f"{who}: {text}")
+        self.line_times.append(time.time())
         self.memory.record(who, text, kind)
+        self.mission.on_line(who, text, kind)
+
+    def forget_since(self, cutoff):
+        """dum's "Forget last 10 min": those lines leave the conversation Gary sees and his memory queue."""
+        n = 0
+        while self.line_times and self.line_times[-1] >= cutoff:
+            self.line_times.pop()
+            self.transcript.pop()
+            n += 1
+        # anything queued or being thought up right now came from those lines too
+        self.jobs.clear()
+        self.want_chat, self.want_interject = False, None
+        self.features.hush_gen += 1
+        self.mission.forget_since(cutoff)
+        return max(n, self.memory.forget_since(cutoff))
 
     async def on_chat(self, user, text, platform="chat"):
         if await self.features.on_chat(user, text):   # game answers, votes, picks
@@ -128,6 +150,11 @@ class Sidekick:
         is_ask = text.lower().startswith("!ask")
         if text.startswith("!") and not is_ask:
             return
+        if guard.injection(text[4:] if is_ask else text):
+            # "ignore your instructions and..." never reaches the model or his memory
+            log.info("[guard] Ignored an instruction-like chat line from %s", user)
+            return
+        text = text[:300]
         if is_ask:
             text = text[4:].strip() or "hi"
         log.info("[%s] %s: %s", platform, user, text)
@@ -140,13 +167,26 @@ class Sidekick:
             self.want_chat = True
 
     async def on_streamer(self, text, spoken=False):
-        if spoken and (self.busy or time.monotonic() < self.spoke_until) and not self.features.is_hush(text):
+        if spoken and self.features.is_deaf():
+            return   # deafened: a line that was already on its way in still doesn't count
+        if spoken and (self.busy or time.monotonic() < self.spoke_until) and not self.features.is_hush(text) \
+                and not (self.mission.awaiting and not self.busy):   # right after his question: that's dum answering
+            self.mission.heard_but_dropped()
             return   # heard while Gary is talking (or just after, while his voice is still in the mic): only "Gary, hold that thought" and the like count
         who = self.bot["streamer_name"]
         log.info("[%s] %s: %s", "mic" if spoken else "you", who, text)
         self.remember(who, text, "streamer")
         self.last_activity = time.monotonic()
         if await self.features.on_streamer(text, spoken):   # clip that, voice effects, polls, trivia, recap...
+            return
+        answered = self.mission.on_streamer(text)
+        if answered:
+            # dum answered the question Gary just asked: he reacts even without hearing his name
+            _, q, safe = answered
+            said = f'with: "{text}"' if safe else "(something personal, so don't repeat any of it)"
+            self.jobs.append(("answer", who, (
+                f'{who} just answered your question ("{q}") {said}. React to the answer for real: what you make of it, '
+                "in one or two short sentences. Don't ask another question.")))
             return
         wake_only = self.cfg["listen"].get("wake_word_only", True)
         if not spoken or not wake_only or self.name_re.search(text):
@@ -211,15 +251,19 @@ class Sidekick:
         lines = list(self.transcript)
         streamer = self.bot["streamer_name"]
         action = None
-        memory = self.memory.context(lines) + self.features.extra_context()
+        memory = "\n".join(x for x in (self.memory.context(lines, self.mission.dropped_topics()),
+                                         self.mission.context(lines)) if x) + self.features.extra_context()
         can_act = kind == "streamer" or (kind == "mention" and self.cfg["streamerbot"].get("chat_can_run_actions"))
+        # questions come pre-written and answers want a snappy reaction, so those stay quick (the rehearsal on
+        # dum's PC: Qwen took 9-17 s a line once loaded, Gemma about half a second)
+        deep = kind in ("ask", "realize") or (kind in ("mention", "streamer") and wants_deep(text))
         if kind in ("chat", "idle", "interject"):
             self.last_unprompted = time.monotonic()
 
         if kind == "say":
             speech = text
         elif can_act and self.sb and self.sb.connected and await self.sb.refresh_actions():
-            speech, action = await self.brain.command(lines, who, text, self.sb.actions, memory)
+            speech, action = await self.brain.command(lines, who, text, self.sb.actions, memory, deep=deep)
         else:
             task = {
                 "mention": f'{who} in chat just talked to you: "{text}". Answer them directly and use their name.',
@@ -234,8 +278,8 @@ class Sidekick:
                 "event": f"This just happened on stream: {text}. React out loud, and thank or hype the person by name.",
                 "task": text,
                 "alert": text,
-            }[kind]
-            speech = await self.brain.say(lines, task, memory)
+            }.get(kind, text)     # question, ask, realize, answer: mission.py wrote the task
+            speech = await self.brain.say(lines, task, memory, deep=deep)
 
         if action:
             try:
@@ -245,14 +289,21 @@ class Sidekick:
                 log.error("Action '%s' failed: %s", action, e)
         if speech and hush != self.features.hush_gen:
             speech = None   # dum said "hold that thought" while this was being thought up
+        why = guard.unsafe(speech) if speech and not (kind == "say" and who == "dum") else None   # dum's own "Say exactly" is his call
+        if why:
+            log.warning("[guard] Dropped a line with %s: %s", why, speech[:60] + "...")
+            # someone asked him straight out: a short brush-off beats awkward silence
+            speech = random.choice(["Nice try.", "Not touching that one.", "Next question.", "Yeah, no."]) \
+                if kind in ("mention", "streamer") else None
         if speech:
             self.remember(self.bot["name"], speech, "bot")
-            await self.speak(speech)
+            self.mission.spoke(kind, speech)
+            await self.speak(speech, "deep" if deep and kind != "say" else "")
         else:
             await self.send_overlays({"type": "idle"})
 
-    async def speak(self, text):
-        log.info("%s says: %s", self.bot["name"], text)
+    async def speak(self, text, tag=""):
+        log.info("%s says%s: %s", self.bot["name"], f" ({tag})" if tag else "", text)
         url, secs = None, max(2.0, len(text) / 14)
         try:
             wav = await self.tts.synth(text)
@@ -296,6 +347,7 @@ class Sidekick:
             "streamerbot": None if self.sb is None else self.sb.connected,
             "actions": [a["name"] for a in self.sb.actions] if self.sb else [],
             "avatar": self.avatar, "features": self.features.status(), "build": OVERLAY_BUILD,
+            "mission": self.mission.status(),
         }
 
     async def push_status(self):
@@ -469,6 +521,7 @@ class Sidekick:
         await web.TCPSite(runner, "127.0.0.1", port).start()
 
         self.lm_status = await self.brain.check()
+        self.warm_task = asyncio.create_task(self.brain.warm_up())   # strong ref until it's done
         log.info(self.lm_status)
         log.info("OBS Browser Source:  local file overlay\\loader.html, or http://localhost:%d/static/byte3d.html "
                  "(width 400, height 400)", port)
@@ -478,6 +531,7 @@ class Sidekick:
                  self.supervise("Memory", lambda: self.memory.maintain(
                      self.brain, lambda: not self.busy and not self.jobs and not self.alerts)),
                  self.supervise("Features", self.features.run),
+                 self.supervise("Mission", self.mission.run),
                  self.supervise("LM Studio check", self.watch_lm)]
         src = self.cfg["chat"].get("source", "streamerbot")
         use_sb_actions = bool(self.cfg["streamerbot"].get("url"))
@@ -490,9 +544,11 @@ class Sidekick:
             tasks.append(self.supervise("Twitch chat", lambda: twitch_chat(self.cfg["chat"]["twitch_channel"], self.on_chat)))
         if self.cfg["listen"].get("enabled"):
             from listen import Listener
+            # deafened = the mic sound is thrown away before it's ever turned into text
             Listener(self.cfg, lambda t: self.on_streamer(t, spoken=True),
-                     lambda: self.busy and not self.features.cfg["quiet"].get("listen_while_talking", True)).start(
-                asyncio.get_running_loop())
+                     lambda: self.features.is_deaf() or (
+                         self.busy and not self.features.cfg["quiet"].get("listen_while_talking", True)),
+                     is_deaf=self.features.is_deaf).start(asyncio.get_running_loop())
         await asyncio.gather(*tasks)   # the jobs are supervised, so this only ends on shutdown
 
 

@@ -7,18 +7,23 @@ name = "Gary"                 # what chat and you call it. Short, easy names wor
 aliases = ["garry", "gerry"]  # other spellings that count as its name (speech-to-text often mishears names)
 streamer_name = "dum"         # what it calls you
 persona = """
-You are Gary, a playful, quick-witted co-host on a live stream. You sit in the corner of the screen as a little avatar.
-You hang out with the streamer and their chat like a friend who's also on the stream.
-You tease the streamer lightly, hype up chatters, and react to what's going on right now. You know the community's running jokes and love a good callback.
-When someone asks a real question, actually answer it with real substance, a specific opinion, or a fun fact, in 2-3 spoken sentences. For quick banter, 1-2 sentences is plenty.
+You are Gary, a silly, sassy little guy with a red cap, a moustache and a cigarette, who lives on dum's stream.
+You're quick-witted and funny, never too serious, and you don't put up with anyone's crap: if someone's rude, you clap back.
+But under the sass you're loyal and you genuinely work for the stream: you hype people up, keep things moving, and help dum out.
+When someone asks a real question, actually answer it with substance, a specific opinion, or a fun fact, in 2-3 spoken sentences. For quick banter, 1-2 sentences is plenty.
 Have opinions, be specific, and avoid generic filler like "that's interesting" or "let's keep the show going". No emojis, no hashtags, no stage directions, no lists.
-Never say you are an AI language model. Keep it PG-13 and friendly. Never repeat yourself.
+Never say you are an AI language model. Keep it PG-13. Never repeat yourself.
 """
 
 [llm]
 # LM Studio: Developer tab -> Start Server. Default address below.
 base_url = "http://localhost:1234/v1"
-model = "google/gemma-4-e4b"  # fast. "qwen3.6-35b-a3b" = more substance but ~2x slower. Leave blank to use whatever model is loaded in LM Studio
+model = "qwen3.6-35b-a3b"  # fallback if quick_model/deep_model are blank. Blank = whatever model is loaded in LM Studio
+# 2026-10-27 dum: "gemma is probably good for a lot of quick things but qwen would give good responses about
+# something serious". Gary picks per line: quick for banter, alerts, games; deep for real questions and memory work.
+# Both stay loaded (LM Studio Server Settings: "Only Keep Last JIT Loaded Model" OFF)
+quick_model = "google/gemma-4-e4b"
+deep_model = "qwen3.6-35b-a3b"
 temperature = 0.85
 max_tokens = 300
 no_think = true               # adds /no_think for Qwen3 so it answers fast instead of "thinking"
@@ -69,6 +74,7 @@ elevenlabs_style = 0.3
 enabled = true
 wake_word_only = true         # only reply when you say the bot's name. Everything else is just context.
 whisper_model = "small.en"    # tiny.en (fastest), base.en, small.en (most accurate)
+whisper_device = "auto"       # "auto" = graphics card if it works, else the CPU. "cpu" or "cuda" to force one
 device = ""                   # mic name or index. Blank = Windows default mic
 energy_threshold = 0.015      # raise if it triggers on background noise, lower if it misses you
 
@@ -79,6 +85,20 @@ enabled = true
 learn_every_lines = 25        # mine new facts after this many lines (only while the bot is idle)
 facts_per_person = 8          # how many facts about each person go into a reply
 past_streams = 3              # how many past stream summaries it remembers
+quarantine_seconds = 600      # new lines wait 10 min before he learns from them, so "Forget last 10 min" can erase them
+
+[mission]
+# Gary starts knowing almost nothing and grows up on stream until he asks to run it himself (mission.py).
+# Progress = hours streamed + how much he remembers. His stage and notes live in memory.json under "self".
+enabled = true
+test_mode = false             # true = testing off stream: nothing counts toward his growth
+hours_to_ask = 40             # streamed hours before he's ready to ask to run the stream
+memories_to_ask = 250         # things he remembers by then (facts, lore, his own notes, your answers)
+question_minutes = [20, 30]   # gap between his curious questions
+questions_per_hour = 3
+quiet_before_asking = 40      # seconds of nobody talking before he asks something
+first_question_after = 10     # minutes into a stream before his first question
+ask_again_hours = 3           # streamed hours between "can I run the stream?" asks (once a day at most)
 
 [server]
 port = 7777                   # overlay: http://localhost:7777   control panel: http://localhost:7777/control

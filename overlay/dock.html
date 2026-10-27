@@ -42,6 +42,11 @@
   .pos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
   .pos button { padding: 4px 0; font-size: 11px; }
   .talk3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+  /* Deafen is the one button that must be impossible to misread: big, and red while he can't hear */
+  #deaf { width: 100%; padding: 8px 4px; font-weight: 700; font-size: 13px; }
+  #deaf.isdeaf { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .bar { height: 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); }
 </style>
 </head>
 <body>
@@ -61,6 +66,7 @@
   </div>
   <div id="state">Connecting...</div>
   <div id="hint" style="display:none"></div>
+  <button id="deaf" title="Gary can't hear your mic at all while this is on (chat still works). Click again to let him hear.">Deafen Gary</button>
   <div class="grid three">
     <button id="pause" class="main" title="Pause or resume everything Gary does" data-confirm="Confirm pause">Pause</button>
     <button id="skip" title="Stop the line he's saying now">Skip line</button>
@@ -82,9 +88,28 @@
       <button data-say="go away for 30 minutes">30 min</button>
       <button data-say="go away">Until back</button>
     </div>
+    <div class="lbl">Deafen (he can't hear your mic)</div>
+    <div class="grid four">
+      <button data-deaf="5">5 min</button>
+      <button data-deaf="15">15 min</button>
+      <button data-deaf="30">30 min</button>
+      <button id="forget" data-confirm="Sure?" title="Erase the last 10 minutes of what was said, before he learns from it">Forget 10m</button>
+    </div>
     <div class="grid two">
       <button class="main" data-say="you can talk again">Bring him back</button>
       <button data-say="go ahead, what were you saying">Finish thought</button>
+    </div>
+  </div></details>
+
+  <details open data-k="mission"><summary>Gary's mission <span class="note" id="misNote"></span></summary><div class="body">
+    <div class="lbl" id="misStage">Stage ?</div>
+    <div class="bar"><i id="misBar"></i></div>
+    <div class="lbl" id="misInfo"></div>
+    <div class="grid four">
+      <button data-mis="ask" title="He asks one of his curious questions at the next calm moment">Let him ask</button>
+      <button data-mis="freeze" id="misFreeze" title="Stop or restart his growth">Freeze</button>
+      <button data-mis="stage" data-n="-1" title="Back one stage">Stage -</button>
+      <button data-mis="stage" data-n="1" title="Forward one stage">Stage +</button>
     </div>
   </div></details>
 
@@ -189,6 +214,11 @@ $("pause").onclick = () => {
 };
 $("skip").onclick = e => { if (send({ type: "skip" })) flash(e.target); else hint(NOT_SENT); };
 $("hush").onclick = e => streamer("hold that thought", e.target);
+// deafen goes over the API, not the mic: he can't hear "Gary, you can listen" while deafened
+let deaf = false;
+$("deaf").onclick = e => api("deafen", "on=" + (deaf ? "0" : "1"), e.target);
+$("forget").onclick = e => twoStep(e.target, () => fetch("/api/forget").then(r => r.json())
+  .then(j => { flash(e.target); hint(j.ok ? `Forgot ${j.lines} lines` : "Forget failed"); }).catch(() => hint("Sidekick isn't reachable")));
 $("refresh").onclick = e => { if (send({ type: "refresh" })) flash(e.target); else hint(NOT_SENT); };
 $("openCtl").onclick = () => window.open("/control", "_blank");
 $("idleNow").onclick = e => { if (send({ type: "idle_now" })) flash(e.target); else hint(NOT_SENT); };
@@ -197,6 +227,8 @@ document.addEventListener("click", e => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.say) streamer(b.dataset.say, b);
+  if (b.dataset.deaf) api("deafen", "on=1&minutes=" + b.dataset.deaf, b);
+  if (b.dataset.mis) api("mission", "do=" + b.dataset.mis + (b.dataset.n ? "&n=" + b.dataset.n : ""), b);
   if (b.dataset.do) { if (send({ type: "avatar", set: { do: { name: b.dataset.do, at: Date.now() } } })) flash(b); else hint(NOT_SENT); }
   // voice FX go through the spoken phrase, which works on every sidekick version
   if (b.dataset.fx) streamer(`give me the ${b.dataset.fx} voice`, b);
@@ -280,6 +312,18 @@ function showStatus(m) {
   dot("dLm", (m.lm || "").startsWith("LM Studio OK") ? "ok" : "");
   dot("dSb", m.streamerbot ? "ok" : m.streamerbot === null ? "warn" : "");
   const st = $("state");
+  deaf = !!f.deaf;
+  const db = $("deaf");
+  db.classList.toggle("isdeaf", deaf);
+  db.textContent = deaf ? `GARY CAN'T HEAR YOU (${f.deaf})` : "Deafen Gary";
+  const ms = m.mission || {};
+  if (ms.on) {
+    $("misStage").textContent = `Stage ${ms.stage}: ${ms.name}` + (ms.close ? " - he's close to figuring it out!" : "");
+    $("misBar").style.width = Math.round((ms.progress || 0) * 100) + "%";
+    $("misInfo").textContent = `${ms.label} · ${ms.hours}h streamed · ${ms.memories} memories` + (ms.test ? " · TEST MODE" : "") + (ms.asks ? ` · asked to take over ${ms.asks}x` : "");
+    $("misFreeze").textContent = ms.frozen ? "Unfreeze" : "Freeze";
+    $("misNote").textContent = ms.wondering ? "wondering..." : ms.frozen ? "frozen" : "";
+  } else { $("misStage").textContent = "Mission is off (config.toml [mission])"; }
   if (paused) { st.className = "off"; st.textContent = "Paused: Gary won't say anything"; }
   else if (f.muted) { st.className = "quiet"; st.textContent = "Quiet: " + f.muted; }
   else { st.className = ""; st.textContent = m.overlays > 0 ? "Live and talking" : "Running, no overlay open"; }
@@ -314,7 +358,7 @@ function connect() {
 }
 connect();
 // mute countdown only updates on status pushes, so ask for fresh status now and then while quiet
-setInterval(() => { if ($("muteNote").textContent) send({ type: "refresh" }); }, 30000);
+setInterval(() => { if ($("muteNote").textContent || deaf) send({ type: "refresh" }); }, 30000);
 </script>
 </body>
 </html>
