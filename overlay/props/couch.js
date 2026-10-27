@@ -1,30 +1,10 @@
 // Cosy two-seat couch, cartoon style. Origin on the floor at the centre, front faces +z.
 // Gary sits on the left (-x) cushion. Seat top y = 0.44, seat front z = 0.35, back rises to y ~1.0.
 
+import { clamp, disposeTree, rbox } from './common.js';
+
 export function build(THREE, ctx) {
   const { mesh, group, canvasTex } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-
-  // Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r).
-  // Normals are set analytically so edges shade smoothly. bottomOrigin moves the origin to the bottom face.
-  function rbox(w, h, d, r, seg = 12, bottomOrigin = false) {
-    const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-    const hx = w / 2, hy = h / 2, hz = d / 2;
-    const rr = Math.min(r, hx, hy, hz);
-    const ax = hx - rr, ay = hy - rr, az = hz - rr;
-    const P = g.attributes.position, N = g.attributes.normal;
-    const n = new THREE.Vector3();
-    for (let i = 0; i < P.count; i++) {
-      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-      const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-      n.set(x - qx, y - qy, z - qz).normalize(); // surface vertices always have a non-zero offset
-      P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-      N.setXYZ(i, n.x, n.y, n.z);
-    }
-    P.needsUpdate = true; N.needsUpdate = true;
-    if (bottomOrigin) g.translate(0, hy, 0);
-    return g;
-  }
 
   // Materials (teal couch, mustard throw, wooden feet)
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x23706b, roughness: 0.9 });
@@ -57,34 +37,34 @@ export function build(THREE, ctx) {
   for (const x of [-0.8, 0.8]) for (const z of [-0.36, 0.26]) mesh(footGeo, woodMat, root, [x, 0.065, z]);
 
   // Base / plinth: y 0.12 .. 0.30, z -0.48 .. 0.35
-  mesh(rbox(1.9, 0.18, 0.83, 0.07), frameMat, root, [0, 0.21, -0.065]);
+  mesh(rbox(THREE, 1.9, 0.18, 0.83, 0.07), frameMat, root, [0, 0.21, -0.065]);
 
-  // Chunky rounded arm rests at x = +-0.85, top at y 0.66
-  for (const x of [-0.85, 0.85]) mesh(rbox(0.2, 0.54, 0.83, 0.08), armMat, root, [x, 0.39, -0.065]);
+  // Chunky rounded arm rests at x = +-0.853, top at y 0.66 (3 mm outside the plinth and back, whose outer faces are at 0.95)
+  for (const x of [-0.853, 0.853]) mesh(rbox(THREE, 0.2, 0.54, 0.83, 0.08), armMat, root, [x, 0.39, -0.065]);
 
   // Backrest: tilted back ~0.15 rad. Pivot at the bottom of the back, z -0.30, y 0.30.
   const back = group(root, [0, 0.30, -0.30]);
   back.rotation.x = -0.15;
-  mesh(rbox(1.9, 0.72, 0.2, 0.09), frameMat, back, [0, 0.36, -0.06]);
-  for (const x of [-0.45, 0.45]) mesh(rbox(0.8, 0.52, 0.17, 0.075), cushionMat, back, [x, 0.42, 0]);
+  mesh(rbox(THREE, 1.9, 0.72, 0.2, 0.09), frameMat, back, [0, 0.36, -0.06]);
+  for (const x of [-0.45, 0.45]) mesh(rbox(THREE, 0.8, 0.52, 0.17, 0.075), cushionMat, back, [x, 0.42, 0]);
 
   // Seat cushions: pivot at the cushion bottom (y 0.30) so the squash keeps them on the base
   const seatL = group(root, [-0.45, 0.30, 0.055]);
-  mesh(rbox(0.8, 0.14, 0.59, 0.06, 12, true), cushionMat, seatL, [0, 0, 0]);
+  mesh(rbox(THREE, 0.8, 0.14, 0.59, 0.06, 12, true), cushionMat, seatL, [0, 0, 0]);
   const seatR = group(root, [0.45, 0.30, 0.055]);
-  mesh(rbox(0.8, 0.14, 0.59, 0.06, 12, true), cushionMat, seatR, [0, 0, 0]);
+  mesh(rbox(THREE, 0.8, 0.14, 0.59, 0.06, 12, true), cushionMat, seatR, [0, 0, 0]);
 
   // Loose mustard throw pillow leaning in the right-hand corner
-  mesh(rbox(0.36, 0.34, 0.12, 0.06), throwMat, root, [0.56, 0.61, -0.15], [1, 1, 1], [-0.25, 0, 0.15]);
+  mesh(rbox(THREE, 0.36, 0.34, 0.12, 0.06), throwMat, root, [0.56, 0.61, -0.15], [1, 1, 1], [-0.25, 0, 0.15]);
 
   // Soda can on the far (+x) arm, and a bag of chips lying on the same arm
   const canGeo = new THREE.CylinderGeometry(0.034, 0.034, 0.12, 18);
   mesh(canGeo, [canMat, silverMat, silverMat], root, [0.85, 0.72, -0.25]);
-  mesh(rbox(0.14, 0.04, 0.2, 0.016, 6), [plainBagMat, plainBagMat, bagTopMat, plainBagMat, plainBagMat, plainBagMat],
+  mesh(rbox(THREE, 0.14, 0.04, 0.2, 0.016, 6), [plainBagMat, plainBagMat, bagTopMat, plainBagMat, plainBagMat, plainBagMat],
     root, [0.85, 0.68, 0.12], [1, 1, 1], [0, 0.3, 0.03]);
 
   const anchors = {
-    armrest: new THREE.Vector3(-0.85, 0.66, 0.0),  // arm rest on Gary's right (-x side when he faces +z)
+    armrest: new THREE.Vector3(-0.853, 0.66, 0.0),  // arm rest on Gary's right (-x side when he faces +z)
     seatR: new THREE.Vector3(0.45, 0.44, 0.05),    // top centre of the empty right cushion
   };
 
@@ -104,9 +84,7 @@ export function build(THREE, ctx) {
       seatL.scale.set(1 + 0.04 * squash, 1 - 0.15 * squash, 1 + 0.02 * squash);
     },
     dispose() {
-      root.traverse((o) => {
-        if (o.geometry) o.geometry.dispose();
-      });
+      disposeTree(root, ctx.sphere);
       for (const m of [frameMat, armMat, cushionMat, throwMat, woodMat, silverMat, plainBagMat, canMat, bagTopMat]) m.dispose();
       canTex.dispose(); bagTex.dispose();
     },

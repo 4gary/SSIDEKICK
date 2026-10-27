@@ -11,6 +11,7 @@ Settings live in features.toml. Long-term stats live in features_data.json (plai
 while Gary is off).
 """
 import asyncio
+import copy
 import datetime
 import json
 import logging
@@ -21,6 +22,7 @@ import time
 import tomllib
 
 import aiohttp
+from urllib.parse import urlsplit
 from aiohttp import web
 
 from obs import OBS
@@ -42,10 +44,10 @@ DEFAULTS = {
              "winner_chat_pattern": ""},
     "clips": {"keyword": "clip"},
     # OBS scene name (regex, lowercase) -> Gary's stream mode on the overlay. First match wins.
-    "scene_modes": {"ending": r"\b(ending|outro|end screen|that'?s the show|goodbye)\b", "starting": r"\b(starting|soon|intro)\b",
-                    "brb": r"\b(brb|be right back|break|away)\b", "marble": r"marble", "party": r"\b(party|disco|dance)\b",
-                    "chill": r"\b(chill|lofi|cozy)\b", "gaming": r"\b(game|gaming|gameplay)\b",
-                    "chatting": r"\b(chat|chatting|camera|cam|talk)\b"},
+    "scene_modes": {"marble": r"marble", "ending": r"\b(ending|outro|end screen|that'?s the show|goodbye)\b",
+                    "starting": r"\b(starting|soon|intro)\b", "brb": r"\b(brb|be right back|break|away)\b",
+                    "party": r"\b(party|disco|dance)\b", "chill": r"\b(chill|lofi|cozy)\b",
+                    "gaming": r"\b(games?|gaming|gameplay)\b", "chatting": r"\b(chat|chatting|camera|cam|talk)\b"},
     "crowd": {"hype": True, "hype_messages": 6, "hype_people": 4, "rip": True, "rip_messages": 4, "window_seconds": 10,
               "cooldown_seconds": 120},
     "effects": {"enabled": True, "prefix": "FX", "seconds": {"acid": 30, "drunk": 30, "turn off": 30},
@@ -61,6 +63,10 @@ DEFAULTS = {
 
 def _today():
     return datetime.date.today().isoformat()
+
+
+def _yesterday():
+    return (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
 
 def _norm(s):
@@ -83,12 +89,35 @@ def event_user(d, nested=("user", "from", "raider", "message")):
                       "username", "name", "login", "user_login", "from_broadcaster_user_login"))
     if name:
         return name
+    if isinstance(d.get("user"), str) and d["user"].strip():     # some payloads just say "user": "bob"
+        return d["user"].strip()
     for k in nested:
         if isinstance(d.get(k), dict):
             name = event_user(d[k], ())
             if name:
                 return name
     return None
+
+
+def sub_tier(v):
+    """Streamer.bot sends subTier as 0 (Prime), 1, 2 or 3; some payloads say 1000/2000/3000 or "prime".
+    Returns (tier as "1000"/"2000"/"3000" or "", is_prime)."""
+    s = "" if v is None else str(v).strip().lower()
+    if s in ("0", "prime"):
+        return "", True
+    s = {"1": "1000", "2": "2000", "3": "3000"}.get(s, s)
+    return (s if s in ("1000", "2000", "3000") else ""), False
+
+
+def _int(v, default=0):
+    """Query values arrive as text, and a placeholder like "%viewers%" can slip through: use the default."""
+    if v in (None, ""):
+        return default
+    try:
+        return int(float(v))
+    except (TypeError, ValueError, OverflowError):
+        log.warning("Ignoring non-number %r, using %s", v, default)
+        return default
 
 
 def event_num(d, keys):
@@ -139,6 +168,8 @@ class Features:
         self.recent = {}            # de-duplicates stream events
         self.gift_bombs = {}
         self.vision_ok = True
+        self.vision_off_at = 0.0    # when vision was switched off (it is tried again after 10 minutes)
+        self.glancing = False       # one screen glance in flight at a time
         self.games_ws = set()
         self.obs = None
         self.scene = ""
@@ -147,8 +178,11 @@ class Features:
         self.mute_until = 0.0       # Gary stays quiet until then (inf = until told)
         self.away = None            # {"mode": mode to go back to, "next": time of next idle activity} while sent away
         self.held = None            # (time, line) Gary got cut off on, for "go ahead"
-        if self.state.get("avatar"):
-            sk.avatar.update(self.state["avatar"])   # where he was told to stand last time ("Gary, stay at the bottom")
+        # where he was told to stand, and the control page settings: sidekick.py deep-merges saved_avatar on startup
+        saved = {k: copy.deepcopy(v) for k, v in (self.state.get("avatar") or {}).items() if k != "do"}
+        self.saved_avatar = saved or None
+        if saved:
+            sk.avatar.update(saved)                   # ("Gary, stay at the bottom" is remembered too)
         pat = self.cfg["race"].get("winner_chat_pattern")
         self.winner_re = re.compile(pat, re.I) if pat else None
 
@@ -160,7 +194,11 @@ class Features:
 
     def task(self, prompt, unprompted=False, alert=False):
         if alert:
-            self.sk.jobs.appendleft(("alert", None, prompt))   # ahead of chat, so it lands with the 3D reaction
+            q = getattr(self.sk, "alerts", None)     # sidekick.py's own FIFO, played before chat
+            if q is not None:
+                q.append(("alert", None, prompt))
+            else:
+                self.sk.jobs.appendleft(("alert", None, prompt))   # ahead of chat, so it lands with the 3D reaction
         else:
             self.sk.jobs.append(("task", None, prompt))
         if unprompted:
@@ -231,6 +269,8 @@ class Features:
     def log_event(self, text):
         today = self.state["today"]
         if today.get("date") != _today():
+            if today.get("date"):
+                self.state["yesterday"] = {"date": today["date"], "events": today.get("events", [])}
             today.update(date=_today(), events=[])
         today["events"].append(f"{datetime.datetime.now():%H:%M} {text}")
         del today["events"][:-80]
@@ -327,19 +367,26 @@ class Features:
         self.note_arrival(user, text)
         return False
 
+    def norm_cmd(self, text, keep_case=False):
+        """What Gary matches on: the text without his name, without " ,.!?" at the ends, single spaces.
+        Lowercase unless keep_case (names and topics keep the spelling dum used)."""
+        t = re.sub(r"\s+", " ", self.sk.name_re.sub(" ", text)).strip(" ,.!?")
+        return t if keep_case else t.lower()
+
     async def on_streamer(self, text, spoken=False):
         """Handles clear-cut commands (clip, voice effects, games, recap...). Return True if handled."""
         self.last_streamer = time.monotonic()
         if spoken and not self.sk.name_re.search(text):
             return False
-        cmd = self.sk.name_re.sub(" ", text).strip(" ,.!?").lower()
-        cmd = re.sub(r"\s+", " ", cmd)
+        raw = self.norm_cmd(text, keep_case=True)
+        cmd = raw.lower()
         try:
             if await self.quiet_command(cmd):
                 return True
-            if self.muted() and self.sk.name_re.search(text):
-                self.unmute()     # dum called him by name: he's back and answers
-            return await self.command(cmd)
+            handled = await self.command(cmd, raw)
+            if not handled and self.muted() and self.sk.name_re.search(text):
+                self.unmute()     # dum called him by name to talk: he's back and answers (a command like a voice FX button keeps the break)
+            return handled
         except Exception as e:
             log.error("Feature command failed: %s", e)
             return False
@@ -347,25 +394,32 @@ class Features:
     # ------------------------------------------------------------ hold that thought / quiet for X minutes
 
     QUIET = (r"\b(stop talking|no talking|shut up|shush|shh+|hush|zip it|pipe down|(be|keep|stay) quiet|quiet (down|please|for)|"
-             r"mute yourself|mute for|silence for|not now|take (five|ten|a break|a breather)|chill (out|for)|"
-             r"stop (it|now|right there|there)$|^(quiet|mute|silence|chill)$)")
-    AWAY = r"\b(go away|get lost|scram|beat it|take a hike|go (take a nap|chill|play|do something|have fun|hang out))\b"
-    HUSH = r"\b(hold (that|the|your|on|up)|hang on|one sec(ond)?|wait|that'?s enough|cut it|^stop$)\b|" + QUIET
+             r"mute yourself|mute for|silence for|not now|take (five|ten)|^(quiet|mute|silence)$)")
+    AWAY = r"\b(go away|get lost|scram|beat it|take a hike|go (take a nap|chill))\b"
+    HUSH = r"\b(hold (that|the|your|on|up)|hang on|one sec(ond)?|wait|that'?s enough|cut it|^stop( it| now| right there)?$)\b|" + QUIET
+    NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                 "ten": 10}
+    RACE_NOT_NAME = {"i", "we", "you", "who", "nobody", "it", "he", "she", "they", "that", "this", "what", "which",
+                     "game", "there", "one", "someone", "everyone"}
 
     def is_hush(self, text):
         """True for '<name>, hold that thought' and the like (checked even while Gary is talking)."""
         if not self.sk.name_re.search(text):
             return False
-        c = self.sk.name_re.sub(" ", text).lower()
+        c = self.norm_cmd(text)
         return bool(re.search(self.HUSH, c) or re.search(r"\b(talk again|come back|unmute|you'?re back)\b", c))
 
     def muted(self):
         return self.mute_until > time.monotonic()
 
+    def queued(self):
+        """True while a chat job or an alert is waiting to be spoken (alerts live in sidekick.py's own FIFO)."""
+        return bool(self.sk.jobs or getattr(self.sk, "alerts", None))
+
     def may_speak(self, kind, who=None):
         """Called by sidekick.py before every line. While muted only alerts (and the "going quiet" line) get through."""
-        if not self.muted() or who == "quiet":
-            return True
+        if not self.muted() or who in ("quiet", "dum"):
+            return True   # "dum" = dum's own Say exactly from the dock or control page, which gets through a break
         return kind in ("alert", "event") and self.cfg["quiet"].get("alerts_while_muted", True)
 
     async def cut_off(self):
@@ -436,9 +490,9 @@ class Features:
     async def go_away(self):
         """Sent away: stays on screen doing idle activities (props need wander/roam, so switch for the break)."""
         if self.away is None:
-            self.away = {"mode": None}
+            self.away = {"mode": None, "set": None}
             if self.sk.avatar.get("mode") in ("stay", "walkon"):
-                self.away["mode"] = self.sk.avatar["mode"]
+                self.away.update(mode=self.sk.avatar["mode"], set="wander")
                 await self.set_avatar({"mode": "wander"})
         self.away["next"] = time.monotonic() + 100
         name = random.choice(self.cfg["quiet"].get("away_activities") or ["phone"])
@@ -449,17 +503,27 @@ class Features:
         self.sk.avatar.update(change)
         await self.sk.send_overlays({"type": "avatar", "set": change})
         if remember:
-            self.state["avatar"] = {k: self.sk.avatar[k] for k in ("mode", "home") if k in self.sk.avatar}
+            self.state["avatar"] = {**(self.state.get("avatar") or {}), **{k: self.sk.avatar[k] for k in ("mode", "home") if k in self.sk.avatar}}
             self.dirty = True
+
+    def on_avatar_set(self, avatar):
+        """The control page changed Gary's settings: keep them for the next start. One-shot "do" events are not kept."""
+        if not isinstance(avatar, dict):
+            return
+        keep = copy.deepcopy({k: v for k, v in avatar.items() if k != "do"})
+        self.state["avatar"] = {**(self.state.get("avatar") or {}), **keep}
+        self.dirty = True
 
     def unmute(self, say=False):
         self.mute_until = 0.0
         if self.away is not None:
-            prev, self.away = self.away.get("mode"), None
+            prev, set_to, self.away = self.away.get("mode"), self.away.get("set"), None
             asyncio.create_task(self.sk.send_overlays({"type": "avatar", "set": {"do": {"name": "stop", "at": int(time.time() * 1000)}}}))
-            if prev and prev != self.sk.avatar.get("mode"):
+            if prev and self.sk.avatar.get("mode") == set_to:     # only if nothing moved him during the break
                 asyncio.create_task(self.set_avatar({"mode": prev}))
-        self.sk.jobs.clear()          # anything that piled up is old news now
+        self.sk.jobs.clear()                            # anything that piled up is old news now
+        if getattr(self.sk, "alerts", None):
+            self.sk.alerts.clear()
         self.sk.want_chat, self.sk.want_interject = False, None
         log.info("Unmuted")
         asyncio.create_task(self.sk.push_status())
@@ -472,7 +536,9 @@ class Features:
         elif self.away and now >= self.away["next"] and not self.sk.busy:
             await self.go_away()            # next idle activity while he's on break
 
-    async def command(self, c):
+    async def command(self, c, raw=None):
+        """c is the lowercase command; raw is the same text with its original case (for names and topics)."""
+        raw = c if raw is None else raw
         start = r"\b(start|do|run|make|host|open|let'?s (do|have|play)|time for|new|another|quick)\b"
         if await self.move_command(c):
             return True
@@ -498,21 +564,22 @@ class Features:
                 await self.end_poll()
                 return True
             if re.search(start, c) or re.search(r"\bpoll( time|:)", c):
-                rest = re.split(r"\bpoll\b[:,]?\s*", c, maxsplit=1)[-1]
-                await self.start_poll_from_words(re.sub(r"^(about|on|for|asking)\s+", "", rest).strip())
+                rest = re.split(r"\bpoll\b[:,]?\s*", raw, maxsplit=1, flags=re.I)[-1]
+                await self.start_poll_from_words(re.sub(r"^(about|on|for|asking)\s+", "", rest, flags=re.I).strip())
                 return True
-        if re.search(r"\btrivia\b", c) and (re.search(start, c) or re.search(r"\btrivia (time|round|night)\b|\b(end|stop|cancel|enough)\b", c)):
+        if re.search(r"\btrivia\b", c) and (re.search(r"\b(start|run|host|do|begin|new|another)\b.{0,12}\btrivia\b|"
+                                                  r"\btrivia (time|about|questions about)\b|\b(end|stop|cancel|enough)\b", c)):
             if re.search(r"\b(end|stop|cancel|enough)\b", c):
                 self.trivia = None
                 await self.broadcast()
                 self.say("Trivia's over, put your pencils down.")
                 return True
-            topic = re.search(r"\btrivia (?:about|on|questions about) (.+)", c)
-            rounds = re.search(r"\b(\d+|three|four|five|ten) (?:rounds|questions)\b", c)
-            n = {"three": 3, "four": 4, "five": 5, "ten": 10}.get(rounds[1], 0) if rounds else 0
-            if rounds and not n:
-                n = int(rounds[1])
-            await self.start_trivia(topic[1] if topic else "", n or None)
+            nums = "|".join(self.NUM_WORDS) + r"|\d+"
+            rounds = re.search(rf"\b({nums}) (?:rounds?|questions?)\b", c)
+            n = (int(rounds[1]) if rounds[1].isdigit() else self.NUM_WORDS[rounds[1]]) if rounds else 0
+            body = re.sub(rf",?\s*\b(?:for\s+)?(?:{nums}) (?:rounds?|questions?)\b", "", raw, flags=re.I)
+            topic = re.search(r"\btrivia (?:about|on|questions about) (.+)", body, re.I)
+            await self.start_trivia(topic[1].strip() if topic else "", n or None)
             return True
         if re.search(r"\bpredictions?\b", c):
             if re.search(r"\bcancel\b", c) and self.predict:
@@ -524,27 +591,35 @@ class Features:
                 await self.lock_predict()
                 return True
             if re.search(start, c) or re.search(r"\bpredictions?( time|:)", c):
-                rest = re.split(r"\bpredictions?\b[:,]?\s*", c, maxsplit=1)[-1]
-                await self.start_predict_from_words(re.sub(r"^(about|on|for)\s+", "", rest).strip())
+                rest = re.split(r"\bpredictions?\b[:,]?\s*", raw, maxsplit=1, flags=re.I)[-1]
+                await self.start_predict_from_words(re.sub(r"^(about|on|for)\s+", "", rest, flags=re.I).strip())
                 return True
         if self.predict and not self.predict.get("race") and self.predict.get("options") \
                 and re.search(r"\b(won|wins|win|winner|answer|result|correct|it was|it's|it is)\b", c):
-            hits = [i for i, o in enumerate(self.predict["options"]) if re.search(rf"\b{re.escape(o.lower())}\b", c)]
+            opts = self.predict["options"]
             num = re.search(r"\b(?:option|number) (\d)\b", c)
-            if num and 1 <= int(num[1]) <= len(self.predict["options"]):
-                hits = [int(num[1]) - 1]
-            if len(hits) == 1:
-                await self.resolve_predict(self.predict["options"][hits[0]])
+            # the whole answer must be one option: "the answer is yes", "blue won", "option 2 won"
+            said = re.search(r"\b(?:answer|winner|result) (?:is|was) (.+)$", c) or \
+                re.search(r"^(?:it was |it's |it is )?(.+?) (?:won|wins|is correct|was right)$", c)
+            said = re.sub(r"^the ", "", said[1]).strip() if said else ""
+            hit = None
+            if num and 1 <= int(num[1]) <= len(opts):
+                hit = opts[int(num[1]) - 1]
+            elif said:
+                hit = next((o for o in opts if _norm(o) == _norm(said)), None)
+            if hit is not None:
+                await self.resolve_predict(hit)
                 return True
-        if not self.race and (re.search(r"\b(race|marbles?)\b.*\b(starting|begins|beginning|is on|go time|here we go)\b", c)
-                              or re.search(r"\bstart(ing)? (the|a) (marble )?race\b", c)):
+        if not self.race and (re.search(r"\b(race|marbles?)\b.*\b(starting|begins|beginning|is on|go time|here we go)\b(?! soon)", c)
+                              or re.search(r"\bstart(ing)? (the|a) (marble )?race\b(?! soon)", c)):
             await self.race_start()
             return True
         if self.race:
             m = re.search(r"\b(?:winner is|won by) @?([\w\-]+(?: [\w\-]+)?)", c) or \
                 re.search(r"@?([\w\-]+) (?:won|wins)\b", c)
-            if m and m[1] not in ("i", "we", "you", "who", "nobody", "it", "he", "she", "they"):
-                await self.race_end(m[1])
+            if m and m[1].split()[0] not in self.RACE_NOT_NAME:
+                name = raw[m.start(1):m.end(1)] if len(raw) == len(c) else m[1]
+                await self.race_end(name)
                 return True
             if re.search(r"\brace is (over|done|finished)\b", c):
                 await self.race_end(None)
@@ -556,7 +631,7 @@ class Features:
             self.announce_leaderboard()
             return True
         if re.search(r"\b(look at (this|that|the screen|my screen)|what do you see|you seeing this|"
-                     r"check (this|that) out|see (this|that)|watch this)\b", c):
+                     r"check (this|that) out|watch this|see this on screen)\b", c):
             return await self.glance_now()
         return False
 
@@ -574,7 +649,7 @@ class Features:
                 await self.end_poll()
             elif g("options"):
                 await self.open_poll(g("question", "Chat decides"), self.split_options(g("options")),
-                                     int(g("seconds", 0) or 0) or None)
+                                     _int(g("seconds")) or None)
             else:
                 await self.start_poll_from_words(g("question") or g("topic"))
         elif kind == "trivia":
@@ -582,9 +657,11 @@ class Features:
                 self.trivia = None
                 await self.broadcast()
             else:
-                await self.start_trivia(g("topic"), int(g("rounds", 0) or 0) or None)
+                await self.start_trivia(g("topic"), _int(g("rounds")) or None)
         elif kind == "predict":
-            if g("resolve"):
+            if "resolve" in p:          # a blank resolve does nothing (never starts a new prediction)
+                if not g("resolve"):
+                    return {"ok": False, "reason": "nothing to settle"}
                 await self.resolve_predict(g("resolve"))
             elif g("cancel"):
                 self.predict = None
@@ -594,9 +671,9 @@ class Features:
             else:
                 await self.start_predict_from_words(g("question"), self.split_options(g("options")) or None)
         elif kind in ("raid", "sub", "resub", "gift", "giftbomb", "cheer", "follow"):
-            await self.stream_event(kind, g("user", "someone"), viewers=int(g("viewers", 0) or 0),
-                                    months=int(g("months", 0) or 0), count=int(g("count", 0) or 0),
-                                    bits=int(g("bits", 0) or 0), game=g("game"), tier=g("tier"),
+            await self.stream_event(kind, g("user", "someone"), viewers=_int(g("viewers")),
+                                    months=_int(g("months")), count=_int(g("count")),
+                                    bits=_int(g("bits")), game=g("game"), tier=g("tier"),
                                     recipient=g("recipient"))
         elif kind == "clip":
             await self.clip()
@@ -609,10 +686,11 @@ class Features:
         elif kind == "voice":     # buttons/docks: always a request, so phrase it as one
             await self.voice_command(f"please {g('effect', 'random').lower()} voice")
         elif kind == "do":          # test the overlay's event animations: /api/do?name=raid&who=Bob&n=50
-            await self.avatar_do(g("name", "hype"), g("who", "TestUser"), n=int(g("n", 0) or 0),
-                                 months=int(g("months", 0) or 0), title=g("title"))
+            await self.avatar_do(g("name", "hype"), g("who", "TestUser"), n=_int(g("n")),
+                                 months=_int(g("months")), title=g("title"))
         elif kind == "fx":
-            await self.fx_command(f"please {g('effect').lower()}")
+            if not await self.fx_command(f"please {g('effect').lower()}"):
+                return {"ok": False, "reason": f"no effect matches '{g('effect')}'"}
         elif kind == "leaderboard":
             self.announce_leaderboard()
         elif kind == "features":
@@ -625,10 +703,10 @@ class Features:
         left = self.mute_until - time.monotonic()
         return {"muted": None if left <= 0 else ("until called" if left == float("inf") else f"{int(left)}s left"),
                 "poll": bool(self.poll), "trivia": bool(self.trivia), "predict": bool(self.predict),
-                "race": bool(self.race), "role": self.role[0] if self.role else None,
+                "race": bool(self.race), "away": bool(self.away), "role": self.role[0] if self.role else None,
                 "obs": bool(self.obs and self.obs.connected), "scene": self.scene,
-                "vision": self.cfg["vision"].get("enabled") and self.vision_ok,
-                "voice_effects": self.actions_with(*self.cfg["voice_effects"]["keywords"])}
+                "vision": self.cfg["vision"].get("enabled") and self.vision_ready(),
+                "voice_effects": self.effect_actions()}
 
     def routes(self, app):
         page = os.path.join(BASE, "overlay", "games.html")
@@ -724,7 +802,7 @@ class Features:
 
     def greet_tick(self, now):
         self.arrivals = [a for a in self.arrivals if now - a["at"] < 180]
-        if not self.arrivals or self.sk.jobs or self.sk.busy:
+        if not self.arrivals or self.queued() or self.sk.busy:
             return
         if now - self.last_greet < self.cfg["regulars"].get("greet_gap_seconds", 40):
             return
@@ -757,7 +835,8 @@ class Features:
         av = self.sk.avatar
         home = dict(av.get("home") or {"x": 0.72, "z": 0})
         change = {}
-        if re.search(r"\b(stay (put|there|here|still|in place|at|on|down|right|left|in the)|hold still|don'?t move|"
+        if re.search(r"\b(stay (put|still|stationary|in place)|stay (at|on|in) the (bottom|top|left|right|middle|centre|"
+                     r"center|back|front)|hold still|don'?t move|"
                      r"stop (moving|walking|roaming|wandering)|park (it|yourself)|sit still|stand still|stationary)\b", c):
             change["mode"] = "stay"
         elif re.search(r"\b(free ?roam|roam( around)?|go (roam|explore)|walk around (the|wherever)|move around freely)\b", c):
@@ -782,7 +861,7 @@ class Features:
             if home != av.get("home"):
                 change["home"] = home
         av.update(change)
-        self.state["avatar"] = {k: av[k] for k in ("mode", "home") if k in av}
+        self.state["avatar"] = {**(self.state.get("avatar") or {}), **{k: av[k] for k in ("mode", "home") if k in av}}
         self.dirty = True
         await self.sk.send_overlays({"type": "avatar", "set": change})
         await self.sk.push_status()
@@ -831,7 +910,8 @@ class Features:
         return True
 
     def effect_actions(self):
-        return self.actions_with(*self.cfg["voice_effects"]["keywords"])
+        """Voice-effect actions: the keyword is in the name and the name says "voice" ("Robot Dance Clip" is not one)."""
+        return [a for a in self.actions_with(*self.cfg["voice_effects"]["keywords"]) if "voice" in a.lower()]
 
     def effect_on(self, name, whose_idea):
         """Puts the effect in the conversation, so Gary knows it's on the streamer's voice (not his) and for how long."""
@@ -880,7 +960,9 @@ class Features:
 
     async def effect_tick(self, now):
         fx = self.cfg["voice_effects"]
-        if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.sk.jobs:
+        if not (fx.get("enabled") and fx.get("on_his_own")) or self.sk.paused or self.sk.busy or self.queued():
+            return
+        if self.muted() or self.away:     # he can't announce a prank while muted or away
             return
         if now - self.last_effect < fx.get("own_min_minutes", 20) * 60 or now - self.last_streamer > 60:
             return     # only when dum is actually talking, so there's someone to hear it on
@@ -902,7 +984,7 @@ class Features:
 
     @staticmethod
     def split_options(s):
-        parts = [x.strip(" ?.!") for x in re.split(r"\||,|\bor\b", s or "") if x.strip(" ?.!")]
+        parts = [x.strip(" ?.!") for x in re.split(r"\||,|\bor\b", s or "", flags=re.I) if x.strip(" ?.!")]
         return parts[:6] if len(parts) >= 2 else []
 
     async def start_poll_from_words(self, words):
@@ -1029,7 +1111,7 @@ class Features:
         tr = self.trivia
         if not tr:
             return
-        if tr["phase"] == "ready" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs:
+        if tr["phase"] == "ready" and now >= tr["next_at"] and not self.sk.busy and not self.queued():
             q = tr["questions"][tr["n"]]
             tr.update(phase="asking", q=q, answers={}, asked_at=now)
             spoken = " ".join(f"{LETTERS[i]}, {c}." for i, c in enumerate(q["choices"]))
@@ -1056,7 +1138,7 @@ class Features:
             await self.chat(f"Answer: {correct}. " + (f"Correct: {names}" if right else "Nobody got it!"))
             tr["n"] += 1
             await self.broadcast()
-        elif tr["phase"] == "reveal" and now >= tr["next_at"] and not self.sk.busy and not self.sk.jobs:
+        elif tr["phase"] == "reveal" and now >= tr["next_at"] and not self.sk.busy and not self.queued():
             if tr["n"] < tr["rounds"]:
                 tr["phase"] = "ready"
                 return
@@ -1121,8 +1203,7 @@ class Features:
             if hit is None and o.isdigit() and 1 <= int(o) <= len(pr["options"]):
                 hit = pr["options"][int(o) - 1]
             o = _norm(hit or outcome)
-        winners = [u for u, v in pr["picks"].values()
-                   if _norm(v) == o or (len(_norm(v)) >= 3 and len(o) >= 3 and (o.startswith(_norm(v)) or _norm(v).startswith(o)))]
+        winners = [u for u, v in pr["picks"].values() if _norm(v) == o]     # the whole pick must equal the answer
         for u in winners:
             self.add_points(u, 2 if pr["race"] else 1)
         self.log_event(f"prediction '{pr['question']}' -> {outcome}; right: {', '.join(winners) or 'nobody'}")
@@ -1138,6 +1219,8 @@ class Features:
     # ------------------------------------------------------------ marble races
 
     async def race_start(self):
+        if self.race:
+            return      # one race at a time
         rc = self.cfg["race"]
         self.race = {"started": time.monotonic(), "glanced": False}
         st = self.state["race"]
@@ -1163,19 +1246,18 @@ class Features:
         r = self.race
         if not r:
             return
-        if not r["glanced"] and now - r["started"] >= self.cfg["race"].get("glance_after_seconds", 25):
+        if not r["glanced"] and not self.glancing and now - r["started"] >= self.cfg["race"].get("glance_after_seconds", 25):
             r["glanced"] = True
-            desc = await self.look("This is a marble race game on a livestream. In one short sentence, say what's "
-                                   "happening in the race right now: who's leading or doing well if names are "
-                                   "visible, pileups, crashes, close calls.")
-            if desc and self.race is r:
-                self.task(f"Live marble race call! On screen right now: {desc}. Commentate it in one quick, excited "
-                          "sentence like a race announcer.")
+            self.glance_in_background(lambda: self.race_glance(r))
         if now - r["started"] > 900:      # nobody ever said who won
             self.race = None
+            if self.predict and self.predict.get("race"):
+                self.predict = None
             await self.broadcast()
 
     async def race_end(self, winner=None, last=None):
+        if not self.race:
+            return      # no race running, so nothing to end
         self.race = None
         st = self.state["race"]
         lines = []
@@ -1218,13 +1300,18 @@ class Features:
     # ------------------------------------------------------------ raids, subs, gifts, cheers, follows
 
     async def on_sb_event(self, source, etype, data):
+        # connections.py already logs every event as "[sb] Source.Type from who"
         if source == "Obs" and etype == "SceneChanged":
             name = (data.get("scene") or {}).get("sceneName") if isinstance(data.get("scene"), dict) else None
             name = name or data.get("sceneName") or data.get("scene")
             if isinstance(name, str) and not (self.obs and self.obs.connected):
                 await self.on_scene(name)
             return
-        if source != "Twitch" or not self.cfg["events"].get("enabled"):
+        if source != "Twitch":
+            return
+        if not self.cfg["events"].get("enabled"):
+            self.warn_once("alerts_off", "Alerts are off ([events] enabled = false in features.toml), so raids, subs, "
+                           "cheers and follows are ignored")
             return
         user = event_user(data) or "someone"
         if etype == "RewardRedemption":
@@ -1232,14 +1319,17 @@ class Features:
             title = _first(reward, ("title", "name")) or _first(data, ("rewardName", "reward_title", "title")) or "a redeem"
             await self.avatar_do("redeem", user, title=title)
             now = time.monotonic()
-            if self.cfg["events"].get("redeems", True) and now - self.recent.get("redeem_said", -999) > 30:
-                self.recent["redeem_said"] = now
+            said_key = f"redeem_said_{user.lower()}"
+            if self.cfg["events"].get("redeems", True) and now - self.recent.get(said_key, -999) > 30:
+                self.recent[said_key] = now
                 self.alert_task(f'{user} just redeemed "{title}" with channel points. React to it by name in one sentence.')
             return
         kind = {"Raid": "raid", "Sub": "sub", "ReSub": "resub", "GiftSub": "gift", "GiftBomb": "giftbomb",
                 "Cheer": "cheer", "Follow": "follow"}.get(etype)
         if not kind:
             return
+        raw_tier = next((data.get(k) for k in ("subTier", "sub_tier", "tier") if data.get(k) not in (None, "")), None) \
+            if etype in ("Sub", "ReSub", "GiftSub", "GiftBomb") else None
         recipient = event_user(data.get("recipient")) if isinstance(data.get("recipient"), dict) else \
             _first(data, ("recipientDisplayName", "recipientUserName", "recipient_user_name"))
         await self.stream_event(
@@ -1249,7 +1339,7 @@ class Features:
                                     "cumulative_total")),
             count=event_num(data, ("gifts", "total", "count", "giftCount")),
             bits=event_num(data, ("bits", "amount")),
-            tier=str(data.get("sub_tier") or data.get("tier") or data.get("subTier") or ""),
+            tier="" if raw_tier is None else str(raw_tier),
             prime=bool(data.get("is_prime") or data.get("isPrime")),
             anonymous=bool(data.get("anonymous") or data.get("isAnonymous")),
             recipient=recipient or "")
@@ -1257,12 +1347,13 @@ class Features:
     async def stream_event(self, kind, user, viewers=0, months=0, count=0, bits=0, game="", tier="", prime=False,
                            anonymous=False, recipient=""):
         now = time.monotonic()
-        key = (kind, user.lower(), recipient.lower())
-        if now - self.recent.get(key, -999) < 90:
+        amount = bits or count or months or viewers     # two cheers of different sizes are both real
+        key = (kind, user.lower(), recipient.lower(), amount)
+        if now - self.recent.get(key, -999) < 5:
             return      # the same event arrived twice (Streamer.bot and a Fetch URL)
         self.recent[key] = now
-        if kind == "gift" and now < self.gift_bombs.get(user.lower(), 0):
-            return      # part of a gift bomb that was already thanked
+        if kind == "gift" and now - self.gift_bombs.get(user.lower(), -999) < 5:
+            return      # the gift bomb's own gifts, which were just thanked as one
         if anonymous:
             user = "an anonymous gifter"
         facts = self.person_facts(user, 3)
@@ -1270,6 +1361,8 @@ class Features:
         visits = self.state["visits"].get(user.lower(), {})
         if visits.get("days", 0) >= 2:
             known += f" They've chatted on {visits['days']} different days."
+        tier, sub_prime = sub_tier(tier)
+        prime = prime or sub_prime
         tier_txt = " Prime" if prime else {"2000": " tier 2", "3000": " tier 3"}.get(tier, "")
         if kind == "raid":
             n = self.state["raids"].get(user.lower(), 0) + 1
@@ -1289,7 +1382,7 @@ class Features:
             self.log_event(f"raid from {user} ({viewers} viewers)")
             await self.avatar_do("raid", user, n=viewers)
         elif kind == "giftbomb":
-            self.gift_bombs[user.lower()] = now + 60
+            self.gift_bombs[user.lower()] = now
             self.alert_task(f"{user} just gifted {count or 'a bunch of'}{tier_txt} subs to chat!{known} Lose your mind about it "
                       "for one or two sentences and thank them by name.")
             self.log_event(f"{user} gifted {count} subs")
@@ -1327,7 +1420,8 @@ class Features:
     # ------------------------------------------------------------ clips and recaps
 
     async def clip(self):
-        acts = self.actions_with(self.cfg["clips"].get("keyword", "clip"))
+        kw = self.cfg["clips"].get("keyword", "clip")
+        acts = [a for a in self.actions_with(kw) if re.search(rf"\b{re.escape(kw)}\b", a, re.I)]
         ok = await self.run_action(acts[0], self.streamer) if acts else False
         moment = " / ".join(list(self.sk.transcript)[-4:])
         self.log_event(f"CLIP: {moment[:300]}")
@@ -1341,28 +1435,29 @@ class Features:
 
     async def recap(self):
         await self.sk.send_overlays({"type": "thinking"})
-        path = os.path.join(self.sk.memory.log_dir, _today() + ".jsonl")
         chatters, lines = {}, []
-        try:
-            with open(path, encoding="utf-8") as f:
-                for row in f:
-                    try:
-                        e = json.loads(row)
-                    except json.JSONDecodeError:
-                        continue
-                    if e.get("kind") == "chat":
-                        chatters[e["who"]] = chatters.get(e["who"], 0) + 1
-                    lines.append(f"{e.get('who')}: {e.get('text')}")
-        except OSError:
-            pass
+        for day in (_yesterday(), _today()):          # the last two days
+            try:
+                with open(os.path.join(self.sk.memory.log_dir, day + ".jsonl"), encoding="utf-8") as f:
+                    for row in f:
+                        try:
+                            e = json.loads(row)
+                        except json.JSONDecodeError:
+                            continue
+                        if e.get("kind") == "chat":
+                            chatters[e["who"]] = chatters.get(e["who"], 0) + 1
+                        lines.append(f"{e.get('who')}: {e.get('text')}")
+            except OSError:
+                pass
         top = sorted(chatters.items(), key=lambda kv: -kv[1])[:5]
         today = next((s for s in self.sk.memory.data.get("streams", []) if s.get("date") == _today()), None)
-        events = self.state["today"]["events"] if self.state["today"].get("date") == _today() else []
+        events = [e for d in (self.state.get("yesterday"), self.state["today"])
+                  if d and d.get("date") in (_yesterday(), _today()) for e in d.get("events", [])]
         facts = []
         if today:
             facts.append("Notes on today's stream: " + today["summary"])
         if events:
-            facts.append("What happened today: " + "; ".join(e.split(" ", 1)[1] for e in events[-30:]))
+            facts.append("What happened in the last two days: " + "; ".join(e.split(" ", 1)[1] for e in events[-30:]))
         if top:
             facts.append("Most active chatters: " + ", ".join(f"{u} ({n} messages)" for u, n in top))
         board = self.leaderboard(3)
@@ -1410,7 +1505,8 @@ class Features:
             await self.sk.send_overlays({"type": "avatar", "set": {"acts": acts}})
             await self.sk.push_status()
             log.info("Gary's stream mode: %s", mode)
-        role = next(((k, v) for k, v in self.cfg.get("roles", {}).items() if k.lower() in low), None)
+        role = next(((k, v) for k, v in self.cfg.get("roles", {}).items()
+                     if re.search(rf"\b{re.escape(k.lower())}\b", low)), None)
         if role and (not self.role or self.role[0] != role[0]):
             self.role = role
             self.log_event(f"Gary did the {role[0]} segment")
@@ -1424,72 +1520,117 @@ class Features:
 
     # ------------------------------------------------------------ vision
 
+    def vision_ready(self):
+        """Vision is switched off only by a "can't see images" error from LM Studio, and tried again after 10 minutes."""
+        if not self.vision_ok and time.monotonic() - self.vision_off_at > 600:
+            self.vision_ok = True
+        return self.vision_ok
+
     async def look(self, prompt):
         """Screenshot of the stream -> one-line description from the vision model. None if unavailable."""
         vc = self.cfg["vision"]
-        if not vc.get("enabled") or not self.vision_ok or not (self.obs and self.obs.connected):
-            return None
-        try:
-            img = await self.obs.screenshot()
-        except Exception as e:
-            self.warn_once("shot", "Couldn't grab a screenshot from OBS: %s", e)
+        if not vc.get("enabled") or not self.vision_ready() or not (self.obs and self.obs.connected):
             return None
         brain = self.sk.brain
-        body = {"model": vc.get("model") or brain.model or "local-model", "temperature": 0.4, "max_tokens": 120,
-                "stream": False, "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": prompt + " No preamble."},
-                    {"type": "image_url", "image_url": {"url": img}}]}]}
-        if brain.llm.get("no_think", True):
-            body["reasoning_effort"] = "none"
-        try:
-            async with brain.session.post(brain.llm["base_url"] + "/chat/completions", json=body,
-                                          timeout=aiohttp.ClientTimeout(total=45)) as r:
-                if r.status >= 400:
-                    err = await r.text()
-                    if re.search(r"image|vision|multimodal|mmproj", err, re.I):
-                        self.vision_ok = False
-                        log.warning("The model in LM Studio can't see images, so screen glances are off. Load a "
-                                    "vision model (or set [vision] model in features.toml). (%s)", err[:150])
-                        return None
-                    raise RuntimeError(f"LM Studio {r.status}: {err[:150]}")
-                data = await r.json()
-            text = re.sub(r"<think>.*?(</think>|$)", "", data["choices"][0]["message"].get("content") or "", flags=re.S)
-            return re.sub(r"\s+", " ", text).strip() or None
-        except Exception as e:
-            log.warning("Screen glance failed: %s", e)
-            return None
+        for width in (960, 640):        # a payload-size error gets one retry at a smaller width
+            try:
+                img = await self.obs.screenshot(width)
+            except Exception as e:
+                self.warn_once("shot", "Couldn't grab a screenshot from OBS: %s", e)
+                return None
+            body = {"model": vc.get("model") or brain.model or "local-model", "temperature": 0.4, "max_tokens": 120,
+                    "stream": False, "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": prompt + " No preamble."},
+                        {"type": "image_url", "image_url": {"url": img}}]}]}
+            if brain.llm.get("no_think", True):
+                body["reasoning_effort"] = "none"
+            try:
+                async with brain.session.post(brain.llm["base_url"] + "/chat/completions", json=body,
+                                              timeout=aiohttp.ClientTimeout(total=45)) as r:
+                    if r.status >= 400:
+                        err = await r.text()
+                        if re.search(r"does not support|not a vision|mmproj|multimodal", err, re.I):
+                            self.vision_ok, self.vision_off_at = False, time.monotonic()
+                            log.warning("The model in LM Studio can't see images, so screen glances are off for 10 "
+                                        "minutes. Load a vision model (or set [vision] model in features.toml). (%s)",
+                                        err[:150])
+                            return None
+                        if r.status in (400, 413) and width == 960:
+                            log.info("LM Studio rejected the screenshot (%s), trying a smaller one", err[:120])
+                            continue
+                        raise RuntimeError(f"LM Studio {r.status}: {err[:150]}")
+                    data = await r.json()
+                text = re.sub(r"<think>.*?(</think>|$)", "", data["choices"][0]["message"].get("content") or "",
+                              flags=re.S)
+                return re.sub(r"\s+", " ", text).strip() or None
+            except Exception as e:
+                log.warning("Screen glance failed: %s", e)
+                return None
+        return None
 
     async def glance_now(self):
-        if not (self.cfg["vision"].get("enabled") and self.vision_ok and self.obs and self.obs.connected):
-            return False      # let the normal reply handle it
+        """"Look at this": he glances and reacts, or says he can't see the screen right now."""
+        if not (self.cfg["vision"].get("enabled") and self.vision_ready() and self.obs and self.obs.connected):
+            self.task(f"{self.streamer} asked you to look at the screen, but you can't see the screen right now. "
+                      "Say so briefly, in one short line, in character.")
+            return True
         await self.sk.send_overlays({"type": "thinking"})
-        desc = await self.look("You're a co-host glancing at the livestream. In one or two sentences, say what's on "
-                               "screen right now: the game or scene and what's happening.")
+        desc = await self.look("You're a co-host glancing at the livestream. In one or two sentences, say what's "
+                               "on screen right now: the game or scene and what's happening.")
         if not desc:
             await self.sk.send_overlays({"type": "idle"})
-            return False
+            self.task(f"{self.streamer} asked you to look at the screen, but you couldn't see it this time. Say so "
+                      "briefly, in one short line, in character.")
+            return True
         self.sk.remember("(stream event)", f"On screen: {desc}", "event")
         self.task(f"{self.streamer} told you to look at the screen. You see: {desc}. React to it like a co-host "
                   "watching along, one or two sentences. Don't describe it like a robot; react.")
         return True
 
+    def glance_in_background(self, job):
+        """A glance waits on LM Studio for seconds, so it runs as its own task. One at a time; the loop never waits."""
+        if self.glancing:
+            return False
+        self.glancing = True
+
+        async def run_job():
+            try:
+                await job()
+            except Exception as e:
+                log.warning("Screen glance failed: %s", e)
+            finally:
+                self.glancing = False
+        asyncio.create_task(run_job())
+        return True
+
     async def glance_tick(self, now):
         vc = self.cfg["vision"]
-        if not vc.get("enabled") or not self.vision_ok or self.sk.paused or self.sk.busy or self.sk.jobs:
+        if not vc.get("enabled") or not self.vision_ready() or self.sk.paused or self.sk.busy or self.queued():
             return
-        if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race:
+        if now - self.last_glance < vc.get("glance_minutes", 4) * 60 or self.trivia or self.race or self.glancing:
             return
         self.last_glance = now
+        self.glance_in_background(self.glance_comment)
+
+    async def glance_comment(self):
         desc = await self.look("You're a co-host glancing at the livestream. In one sentence, say what's on screen "
                                "right now: the game or scene and what's happening.")
         if not desc:
             return
         self.sk.remember("(stream event)", f"On screen: {desc}", "event")
         cool = self.sk.beh.get("interject_cooldown_seconds", 45)
-        if time.monotonic() - self.sk.last_unprompted >= cool and random.random() < vc.get("comment_chance", 0.35):
+        if time.monotonic() - self.sk.last_unprompted >= cool and random.random() < self.cfg["vision"].get("comment_chance", 0.35):
             self.task(f"You just glanced at the stream and saw: {desc}. React to what's happening in one short "
                       "sentence, like a co-host watching along. Stay on what's on screen; no questions.",
                       unprompted=True)
+
+    async def race_glance(self, r):
+        desc = await self.look("This is a marble race game on a livestream. In one short sentence, say what's "
+                               "happening in the race right now: who's leading or doing well if names are "
+                               "visible, pileups, crashes, close calls.")
+        if desc and self.race is r:
+            self.task(f"Live marble race call! On screen right now: {desc}. Commentate it in one quick, excited "
+                      "sentence like a race announcer.")
 
     # ------------------------------------------------------------ games overlay
 
@@ -1533,6 +1674,9 @@ class Features:
                 self.games_ws.discard(ws)
 
     async def games_ws_handler(self, request):
+        origin = request.headers.get("Origin")      # same rule as /ws: only our own pages (localhost) may drive the games
+        if origin and (urlsplit(origin).hostname or "") not in ("localhost", "127.0.0.1"):
+            raise web.HTTPForbidden(text="games socket is for the local pages only")
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
         self.games_ws.add(ws)

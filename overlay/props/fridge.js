@@ -6,6 +6,8 @@
 // interior. The grab anchor is the front can of the lower shelf, which st.taken hides.
 
 // Shared label art for the DUM LITE cans
+import { clamp, disposeTree, rbox, rr, smooth } from './common.js';
+
 function drawCan(g, w, h) {
   g.fillStyle = '#2f6fd1'; g.fillRect(0, 0, w, h);
   g.fillStyle = '#f2c94c'; g.fillRect(0, 0, w, h * 0.12); g.fillRect(0, h * 0.88, w, h * 0.12);
@@ -16,38 +18,9 @@ function drawCan(g, w, h) {
   g.fillText('LITE', w / 2, h * 0.73);
 }
 
-// Canvas helper: rounded rectangle path
-function rrPath(g, x, y, w, h, r) {
-  g.beginPath(); g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
-}
-
 export function build(THREE, ctx) {
   const { mesh, group, canvasTex } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const OPEN_ANG = (110 * Math.PI) / 180;
-
-  // Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r).
-  // Normals are set analytically so edges shade smoothly. bottomOrigin moves the origin to the bottom face.
-  function rbox(w, h, d, r, seg = 12, bottomOrigin = false) {
-    const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-    const hx = w / 2, hy = h / 2, hz = d / 2;
-    const rr = Math.min(r, hx, hy, hz);
-    const ax = hx - rr, ay = hy - rr, az = hz - rr;
-    const P = g.attributes.position, N = g.attributes.normal;
-    const n = new THREE.Vector3();
-    for (let i = 0; i < P.count; i++) {
-      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-      const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-      n.set(x - qx, y - qy, z - qz).normalize(); // surface vertices always have a non-zero offset
-      P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-      N.setXYZ(i, n.x, n.y, n.z);
-    }
-    P.needsUpdate = true; N.needsUpdate = true;
-    if (bottomOrigin) g.translate(0, hy, 0);
-    return g;
-  }
 
   const mats = [], texs = [];
   const M = (p) => { const m = new THREE.MeshStandardMaterial(p); mats.push(m); return m; };
@@ -65,8 +38,8 @@ export function build(THREE, ctx) {
   // "DUMSTREAM" sticker: white die-cut border, coral pill. Transparent corners, so alphaTest.
   const stickerTex = T(256, 96, (g, w, h) => {
     g.clearRect(0, 0, w, h);
-    rrPath(g, 3, 3, w - 6, h - 6, 24); g.fillStyle = '#ffffff'; g.fill();
-    rrPath(g, 13, 13, w - 26, h - 26, 16); g.fillStyle = '#ff6f59'; g.fill();
+    rr(g, 3, 3, w - 6, h - 6, 24); g.fillStyle = '#ffffff'; g.fill();
+    rr(g, 13, 13, w - 26, h - 26, 16); g.fillStyle = '#ff6f59'; g.fill();
     g.fillStyle = '#ffffff'; g.font = "bold 30px 'Segoe UI', Arial, sans-serif";
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText('DUMSTREAM', w / 2, h / 2 + 2);
@@ -107,16 +80,17 @@ export function build(THREE, ctx) {
   const feetG = new THREE.CylinderGeometry(0.035, 0.03, 0.06, 12);
   for (const x of [-0.31, 0.31]) for (const z of [BZ0 + 0.07, BZ1 - 0.07]) mesh(feetG, feetMat, root, [x, 0.03, z]);
 
-  mesh(rbox(0.75, 0.04, BD, 0.02), mintMat, root, [0, 0.08, BZC]);         // bottom panel
-  mesh(rbox(0.75, 0.07, BD, 0.035), mintMat, root, [0, 0.965, BZC]);       // top panel
-  for (const x of [-0.35, 0.35]) mesh(rbox(0.05, YH, BD, 0.02), mintMat, root, [x, YC, BZC]); // side walls
-  mesh(rbox(0.65, YH, 0.04, 0.02), mintMat, root, [0, YC, BZ0 + 0.02]);   // back wall
+  mesh(rbox(THREE, 0.75, 0.04, BD, 0.02), mintMat, root, [0, 0.08, BZC]);         // bottom panel
+  mesh(rbox(THREE, 0.75, 0.07, BD, 0.035), mintMat, root, [0, 0.965, BZC]);       // top panel
+  for (const x of [-0.35, 0.35]) mesh(rbox(THREE, 0.05, YH, BD, 0.02), mintMat, root, [x, YC, BZC]); // side walls
+  mesh(rbox(THREE, 0.65, YH, 0.04, 0.02), mintMat, root, [0, YC, BZ0 + 0.02]);   // back wall
 
   // ---------- interior liners (visible through the open front) ----------
   const back = BZ0 + 0.04;                    // inner face of the back wall
   mesh(new THREE.PlaneGeometry(0.65, YH), glowMat, root, [0, YC, back + 0.002]);   // emissive back panel
   for (const s of [-1, 1]) {
-    mesh(new THREE.PlaneGeometry(BZ1 - back, YH), linerMat, root, [s * 0.325, YC, (back + BZ1) / 2],
+    // 4 mm inside the side walls' inner faces (x +-0.325), so the planes are not coplanar with them
+    mesh(new THREE.PlaneGeometry(BZ1 - back, YH), linerMat, root, [s * 0.321, YC, (back + BZ1) / 2],
       [1, 1, 1], [0, (-s * Math.PI) / 2, 0]);
   }
   mesh(new THREE.PlaneGeometry(0.65, BZ1 - back), linerMat, root, [0, Y0 + 0.002, (back + BZ1) / 2],
@@ -175,9 +149,9 @@ export function build(THREE, ctx) {
 
   // ---------- door (pivot on the +x hinge edge) ----------
   const door = group(root, [0.375, 0, BZ1]);
-  mesh(rbox(0.75, 0.94, 0.07, 0.02), doorMat, door, [-0.375, 0.53, 0.035]);
+  mesh(rbox(THREE, 0.75, 0.94, 0.07, 0.02), doorMat, door, [-0.375, 0.53, 0.035]);
   // Door bins on the inside face (they show when the door is open)
-  for (const y of [0.3, 0.56]) mesh(rbox(0.5, 0.08, 0.04, 0.012), binMat, door, [-0.4, y, -0.02]);
+  for (const y of [0.3, 0.56]) mesh(rbox(THREE, 0.5, 0.08, 0.04, 0.012), binMat, door, [-0.4, y, -0.02]);
 
   // Chrome handle near the free edge, on two standoffs
   const hx = -0.64;
@@ -204,6 +178,7 @@ export function build(THREE, ctx) {
   // ---------- anchors and spots ----------
   const anchors = {
     grab: new THREE.Vector3(-0.18, SH1 + WIRE + CAN_HALF, 0.15), // centre of the front can on the lower shelf
+    handle: new THREE.Vector3(0.375 + hx, 0.66, BZ1 + 0.125),    // chrome door bar, closed-door position (door-local hx, 0.66, 0.125)
   };
   const spots = { use: { x: -0.8, y: 0, z: 0.45, yaw: 2.07, pose: "stand" } };
 
@@ -224,7 +199,7 @@ export function build(THREE, ctx) {
       grabCan.visible = !(st && st.taken);
     },
     dispose() {
-      root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      disposeTree(root, ctx.sphere);
       for (const m of mats) m.dispose();
       for (const t of texs) t.dispose();
     },
@@ -238,7 +213,6 @@ export function build(THREE, ctx) {
 //     by moving the vertices of a 22 x 16 cylinder from a saved copy of its positions.
 export function buildBeer(THREE, ctx) {
   const { mesh, canvasTex, sphere } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const H = 0.17, RT = 0.045, RB = 0.05;     // height, top radius (narrower lid), bottom radius
 
   const root = new THREE.Group();
@@ -311,7 +285,7 @@ export function buildBeer(THREE, ctx) {
       foam.visible = s > 0.02;
     },
     dispose() {
-      root.traverse((o) => { if (o.geometry && o.geometry !== sphere) o.geometry.dispose(); });
+      disposeTree(root, ctx.sphere);
       for (const m of mats) m.dispose();
       for (const t of texs) t.dispose();
     },
@@ -323,8 +297,6 @@ export function buildBeer(THREE, ctx) {
 // (k 0 = fresh and opaque, k 1 = gone). Missing st.k means k 0.
 export function buildBurp(THREE, ctx) {
   const { mesh, group, canvasTex, sphere } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-  const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
   const root = new THREE.Group();
   const mats = [], texs = [];
@@ -375,7 +347,7 @@ export function buildBurp(THREE, ctx) {
       root.visible = a > 0.005;
     },
     dispose() {
-      root.traverse((o) => { if (o.geometry && o.geometry !== sphere) o.geometry.dispose(); });
+      disposeTree(root, ctx.sphere);
       for (const m of mats) m.dispose();
       for (const t of texs) t.dispose();
     },

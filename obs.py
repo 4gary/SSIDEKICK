@@ -37,6 +37,7 @@ class OBS:
         self.scene = ""
         self.pending = {}
         self.on_scene = None
+        self._tasks = set()   # strong refs to scene-change tasks until they finish
 
     async def run(self, on_scene=None):
         self.on_scene = on_scene
@@ -89,7 +90,11 @@ class OBS:
         async for m in self.ws:
             if m.type != aiohttp.WSMsgType.TEXT:
                 continue
-            data = json.loads(m.data)
+            try:
+                data = json.loads(m.data)   # one bad frame must not drop the whole OBS connection
+            except ValueError as e:
+                log.warning("Skipped a bad frame from OBS: %s", e)
+                continue
             op, d = data.get("op"), data.get("d", {})
             if op == 7:
                 fut = self.pending.pop(d.get("requestId"), None)
@@ -100,7 +105,16 @@ class OBS:
                     else:
                         fut.set_exception(RuntimeError(status.get("comment") or f"OBS error {status.get('code')}"))
             elif op == 5 and d.get("eventType") == "CurrentProgramSceneChanged":
-                await self._scene(d.get("eventData", {}).get("sceneName", ""))
+                # as a task: the scene handler talks to Streamer.bot and the overlays, which must not hold up OBS replies
+                t = asyncio.create_task(self._scene_safe(d.get("eventData", {}).get("sceneName", "")))
+                self._tasks.add(t)
+                t.add_done_callback(self._tasks.discard)
+
+    async def _scene_safe(self, name):
+        try:
+            await self._scene(name)
+        except Exception as e:
+            log.warning("Couldn't handle OBS scene change to %s: %s", name, e)
 
     async def _scene(self, name):
         if name and name != self.scene:

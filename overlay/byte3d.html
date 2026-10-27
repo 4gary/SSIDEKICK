@@ -19,8 +19,7 @@
 <script type="importmap">
 { "imports": {
   "three": "./lib/three/build/three.module.min.js",
-  "three/addons/": "./lib/three/examples/jsm/",
-  "@pixiv/three-vrm": "./lib/three-vrm/three-vrm.module.min.js"
+  "three/addons/": "./lib/three/examples/jsm/"
 } }
 </script>
 </head>
@@ -33,11 +32,12 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?vrm=0  ?bg=#4a7fb5  ?yaw=0.6
+// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
 const params = new URLSearchParams(location.search);
 const CAP_TEXT = params.get("cap") ?? "COCK";
 const DEMO = params.has("demo");
 let botName = params.get("name") || "Gary";   // replaced by the app's [bot] name on connect
+let overlayBuild = 0;                          // the app's stamp of the overlay files: a different one after a restart means reload
 const ZOOM = parseFloat(params.get("scale") || "1");
 if (params.get("bg")) document.documentElement.style.background = params.get("bg");
 
@@ -99,6 +99,9 @@ function resize() {
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   computeStage();
+  for (const p of Object.values(PROPS)) if (p.shown) placeProp(p);      // shown props follow the new frame
+  const band = xMaxAt(nav.z, settings.size) + 2.2 * settings.size;       // still on the stage, or just past the edge where roam and walk-on wait
+  nav.x = clamp(nav.x, -band, band);
   bubble.style.maxWidth = stage.wide ? Math.min(520, w * 0.4) + "px" : "90%";
   bubble.style.fontSize = stage.wide ? "22px" : "19px";
 }
@@ -134,9 +137,9 @@ key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 key.shadow.camera.left = -3; key.shadow.camera.right = 3; key.shadow.camera.top = 3.5; key.shadow.camera.bottom = -1.5;
 key.shadow.camera.near = 0.5; key.shadow.camera.far = 20;
-key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025; key.shadow.radius = 5;
+key.shadow.bias = -0.0004; key.shadow.normalBias = 0.025;
 scene.add(key); scene.add(key.target);
-const rim = new THREE.DirectionalLight(0xbfe0ff, 1.5);
+const rim = new THREE.DirectionalLight(0xbfe0ff, 2.0);   // from behind (the update loop keeps it at his back-left)
 scene.add(rim); scene.add(rim.target);
 const fill = new THREE.DirectionalLight(0xffd6c0, 0.55);
 scene.add(fill); scene.add(fill.target);
@@ -174,27 +177,32 @@ const capTex = canvasTex(1024, 512, (g, w, h) => {
     g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
   }
   g.globalAlpha = 1;
-  // panel seams: six panels, none through the front
-  g.strokeStyle = "rgba(90,0,6,.55)"; g.lineWidth = 3;
+  // panel seams: six panels, none through the front. A shadow line under each raised seam, with a row of stitches beside it
   for (let k = 0; k < 6; k++) {
     const u = ((0.25 + (k + 0.5) / 6) % 1) * w;
+    g.strokeStyle = "rgba(70,0,4,.6)"; g.lineWidth = 7; g.setLineDash([]);
     g.beginPath(); g.moveTo(u, 0); g.lineTo(u, h); g.stroke();
-    g.setLineDash([6, 7]); g.strokeStyle = "rgba(255,180,170,.35)"; g.lineWidth = 1.5;
-    g.beginPath(); g.moveTo(u + 4, 0); g.lineTo(u + 4, h); g.stroke();
-    g.setLineDash([]); g.strokeStyle = "rgba(90,0,6,.55)"; g.lineWidth = 3;
+    g.setLineDash([5, 6]); g.strokeStyle = "rgba(255,190,180,.5)"; g.lineWidth = 1.6;
+    for (const dx of [-7, 7]) { g.beginPath(); g.moveTo(u + dx, 0); g.lineTo(u + dx, h); g.stroke(); }
+    g.setLineDash([]);
   }
-  // fuzzy spray-stencil letters on the front panel
+  for (let k = 1; k < 6; k++) {                                     // an eyelet in each panel but the front one
+    const x = ((0.25 + k / 6) % 1) * w, y = h * 0.45;
+    g.fillStyle = "rgba(255,160,150,.45)"; g.beginPath(); g.arc(x, y, 8, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#3a0004"; g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill();
+  }
+  // fuzzy spray-stencil letters on the front panel: narrow enough to stay on the front, where the camera reads them
   g.save();
   g.translate(w * 0.25, h * 0.70);
-  g.scale(1, 1.3);
-  const px = Math.min(116, 560 / Math.max(1, CAP_TEXT.length) * 1.45);
+  g.scale(0.95, 1.25);
+  const px = Math.min(92, 560 / Math.max(1, CAP_TEXT.length) * 1.45);
   g.font = `900 ${px}px 'Arial Rounded MT Bold', 'Arial Black', 'Segoe UI Black', Impact, sans-serif`;
   g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
-  g.shadowColor = "rgba(255,255,255,.9)"; g.shadowBlur = 22;
+  g.shadowColor = "rgba(255,255,255,.9)"; g.shadowBlur = 16;
   g.fillStyle = "#fff"; for (let i = 0; i < 3; i++) g.fillText(CAP_TEXT, 0, 0);
   g.shadowBlur = 0;
-  g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 9;
-  for (let i = 0; i < 14; i++) g.strokeText(CAP_TEXT, (rnd() - 0.5) * 7, (rnd() - 0.5) * 5);
+  g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 7;
+  for (let i = 0; i < 12; i++) g.strokeText(CAP_TEXT, (rnd() - 0.5) * 6, (rnd() - 0.5) * 4);
   g.fillStyle = "#ffffff"; g.fillText(CAP_TEXT, 0, 0);
   g.restore();
 });
@@ -319,13 +327,12 @@ function updateFur(t) {
 // ------------------------------------------------------------ materials
 const M = {
   skin: new THREE.MeshPhysicalMaterial({ map: skinTex, roughness: 0.58, sheen: 0.55, sheenColor: new THREE.Color(0xffb89a), sheenRoughness: 0.5 }),
-  cap: new THREE.MeshStandardMaterial({ map: capTex, roughness: 1, bumpMap: fuzzBump, bumpScale: 1.5 }),
-  capPlain: new THREE.MeshStandardMaterial({ color: 0xd8111a, roughness: 1, bumpMap: fuzzBump, bumpScale: 1.5 }),
-  brim: new THREE.MeshStandardMaterial({ color: 0xcf0f18, roughness: 1, bumpMap: fuzzBump, bumpScale: 1.5 }),
+  cap: new THREE.MeshStandardMaterial({ map: capTex, roughness: 0.86, bumpMap: fuzzBump, bumpScale: 0.6 }),       // twill, not shag
+  capPlain: new THREE.MeshStandardMaterial({ color: 0xd8111a, roughness: 0.86, bumpMap: fuzzBump, bumpScale: 0.6 }),
+  brim: new THREE.MeshStandardMaterial({ color: 0xc90e17, roughness: 0.8, bumpMap: fuzzBump, bumpScale: 0.4 }),
   hair: new THREE.MeshStandardMaterial({ color: 0x5a3418, roughness: 0.85, bumpMap: fuzzBump, bumpScale: 2 }),
   stache: new THREE.MeshStandardMaterial({ color: 0x3f2310, roughness: 0.9 }),
   face: null,
-  cornea: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.06, clearcoat: 1, transparent: true, opacity: 0.16, depthWrite: false }),
   shirt: new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.9, bumpMap: fuzzBump, bumpScale: 0.4 }),
   jeans: new THREE.MeshStandardMaterial({ map: denimTex, roughness: 0.95 }),
   shoe: new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.55 }),
@@ -359,23 +366,24 @@ const bodyProfile = [[0.30, 0.0], [0.335, 0.12], [0.34, 0.28], [0.325, 0.44], [0
   .map(([r, y]) => new THREE.Vector2(r, y));
 const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.86]);
 mesh(new THREE.TorusGeometry(0.145, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.685, 0.0], [1, 1, 0.86], [Math.PI / 2, 0, 0]);
-mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.14, 24), M.skin, torso, [0, 0.72, 0.0]);          // neck
+mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.18, 24), M.skin, torso, [0, 0.66, 0.0]);          // short neck: shows between the chin and the collar
 mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
 mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
 
 // arms: shoulder + elbow pivots so they bend naturally
+const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.30 * side, 0.58, 0]);
+  const sh = group(torso, [0.30 * side, 0.62, 0]);
   mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
   mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.068, 0.16, 8, 16), M.skin, sh, [0, -0.18, 0]);   // upper arm
-  const el = group(sh, [0, -0.26, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.062, 0.17, 8, 16), M.skin, el, [0, -0.1, 0]);    // forearm
-  const hand = group(el, [0, -0.22, 0]);
+  const up = mesh(new THREE.CapsuleGeometry(0.068, ARM_L1 - 0.096, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
+  const el = group(sh, [0, -ARM_L1, 0]);
+  const fore = mesh(new THREE.CapsuleGeometry(0.062, ARM_L2 - 0.084, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
+  const hand = group(el, [0, -ARM_L2, 0]);
   mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
   mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
   for (let i = 0; i < 3; i++) mesh(sphere, M.skin, hand, [(i - 1) * 0.045, -0.11, 0.01], [0.028, 0.035, 0.028]);  // finger bumps
-  sh.rotation.z = 0.18 * side;
+  sh.rotation.z = 0.10 * side;
   return { sh, el, hand, side, up, fore };
 }
 const armN = arm(-1), armP = arm(1);              // armP holds the cigarette side
@@ -396,11 +404,11 @@ const legN = leg(-1), legP = leg(1);
 
 // head on a neck pivot; everything below is built with the head centre at the origin
 const neck = group(torso, [0, 0.70, 0]);
-const head = new THREE.Group(); head.position.y = 0.45;
-const HA = 0.66, HB = 0.60, HC = 0.62;          // head ellipsoid radii
+const head = new THREE.Group(); head.position.y = 0.44;
+const HA = 0.63, HB = 0.57, HC = 0.59;          // head ellipsoid radii: a touch smaller than the balloon he had, still a big chibi head
 mesh(sphere, M.skin, head, [0, 0, 0], [HA, HB, HC]);
-mesh(sphere, M.skin, head, [0, -0.3, 0.05], [0.53, 0.3, 0.47]);  // chubby jaw/cheeks
-mesh(sphere, M.skin, head, [0, -0.25, 0.59], [0.07, 0.06, 0.065]);  // nose
+mesh(sphere, M.skin, head, [0, -0.265, 0.0], [0.50, 0.285, 0.38]);  // chubby jaw/cheeks, kept behind the face patch so the mouth shows
+mesh(sphere, M.skin, head, [0, -0.175, 0.555], [0.10, 0.088, 0.095]);  // a proper button nose, sitting on top of the mustache; gives him a profile
 
 function onFace(obj, az, el, off = 0) {         // place on the head surface at azimuth/elevation (radians), local +z = surface normal
   const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
@@ -448,18 +456,13 @@ const F2P = {                                                    // face angle -
   s: FACE.W / (FACE.az1 - FACE.az0),                              // pixels per radian
 };
 const EYE = { az: 0.4, el: -0.26, w: 0.3, h: 0.27 };          // big banner eyes
-for (const side of [-1, 1]) {                                   // glossy corneas catch the light
-  const c = onFace(new THREE.Group(), EYE.az * side, EYE.el, 0.004);
-  const m = mesh(sphere, M.cornea, c, [0, 0, 0], [EYE.w * 0.62 * 0.9, EYE.h * 0.62 * 0.9, 0.05]);
-  m.castShadow = false; m.renderOrder = 2;
-}
 
 // mustache: a walrus of fuzzy lumps, drooping past the mouth corners
-const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setScalar(1.15);
+const stacheG = onFace(new THREE.Group(), 0, -0.47, -0.012); stacheG.scale.setScalar(1.15);
 {
   const parts = [];
   for (const side of [-1, 1]) {
-    const lumps = [[0.055, 0.0, 0.02, 0.085, 0.06, 0.05], [0.145, -0.03, 0.0, 0.07, 0.05, 0.045], [0.22, -0.085, -0.03, 0.05, 0.045, 0.035]];
+    const lumps = [[0.055, 0.02, 0.02, 0.085, 0.06, 0.05], [0.145, -0.01, 0.0, 0.07, 0.05, 0.045], [0.22, -0.05, -0.03, 0.05, 0.04, 0.035]];   // shorter droop so the open mouth shows below it
     for (const [x, y, z, sx, sy, sz] of lumps) {
       const g = new THREE.SphereGeometry(1, 24, 16);
       g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x * side, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -side * 0.5)), new THREE.Vector3(sx, sy, sz)));
@@ -473,7 +476,7 @@ const stacheG = onFace(new THREE.Group(), 0, -0.53, -0.012); stacheG.scale.setSc
 }
 
 // cigarette hanging out the right corner of the mouth
-const cig = onFace(new THREE.Group(), 0.2, -0.7, -0.015);
+const cig = onFace(new THREE.Group(), 0.2, -0.8, -0.015);
 cig.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0.8, -0.28, 0.5).normalize());
 const cyl = (r, l) => new THREE.CylinderGeometry(r, r, l, 16).rotateX(Math.PI / 2).translate(0, 0, l / 2);
 mesh(cyl(0.026, 0.1), M.filter, cig);
@@ -483,42 +486,74 @@ const ember = mesh(sphere, M.ember, cig, [0, 0, 0.39], [0.024, 0.024, 0.012]);
 const emberLight = new THREE.PointLight(0xff6020, 0.15, 0.7, 2);
 emberLight.position.z = 0.4; cig.add(emberLight);
 
-// cap: oversized fuzzy felt crown with seams, a band, a button, and a big curved brim
-const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = -0.05;
+// cap: a six-panel baseball cap. A low, snug crown whose rim rides on the hair (about 0.01 off it), raised panel seams
+// that meet at a top button, eyelets, and a bill that juts from the front, pitched down, curving down at the sides.
+// Short nap on the crown, not shag, so the silhouette stays crisp. capG keeps its pivot (the animation moves it); capIn
+// holds the geometry with the rim at its origin (head 0, 0.13, -0.02). Tilted back a little, so the rim sits lower at
+// the nape and the bill clears the brows.
+const CAP = { rx: 0.655, rz: 0.635, h: 0.47, front: 0.10, bulge: 0.03, bill: 0.46, tilt: -0.10 };
+const capG = group(head, [0, 0.2, -0.03]); capG.rotation.x = CAP.tilt;
+const capIn = group(capG, [0, -0.07, 0.01]);
+const crownXYZ = (x, y, z, out = 0) => {        // unit upper hemisphere -> crown surface, pushed `out` along the radius
+  const tall = 1 + CAP.front * Math.max(0, z) * (1 - y * 0.4);          // front panels stand taller, the back slopes away
+  const box = 1 + CAP.bulge * Math.sin(Math.PI * y);                    // a touch fuller at the shoulders, less of a dome
+  return [x * (CAP.rx * box + out), y * (CAP.h * tall + out), z * (CAP.rz * box + out)];
+};
 {
-  const crownGeo = new THREE.SphereGeometry(0.80, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.515).scale(1, 0.84, 1.0);
-  const crown = mesh(crownGeo, M.cap, capG);
+  const crownGeo = new THREE.SphereGeometry(1, 72, 36, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  const cp = crownGeo.attributes.position;
+  for (let i = 0; i < cp.count; i++) cp.setXYZ(i, ...crownXYZ(cp.getX(i), cp.getY(i), cp.getZ(i)));
+  crownGeo.computeVertexNormals();
+  const crown = mesh(crownGeo, M.cap, capIn);
   crown.material = M.cap.clone(); crown.material.side = THREE.DoubleSide;
-  capG.add(makeFur(crownGeo, M.cap, { layers: 18, length: 0.04, density: 70, gravity: 0.25, root: 0.58, tip: 1.12, thick: 0.95, wind: 0.08 }));
-  const bandGeo = new THREE.TorusGeometry(0.795, 0.035, 12, 72).rotateX(Math.PI / 2).translate(0, -0.03, 0);
-  mesh(bandGeo, M.capPlain, capG);
-  capG.add(makeFur(bandGeo, M.capPlain, { layers: 10, length: 0.03, density: 90, root: 0.6, tip: 1.1 }));
-  const buttonGeo = new THREE.SphereGeometry(0.055, 24, 16).scale(1, 0.6, 1).translate(0, 0.67, 0);
-  mesh(buttonGeo, M.capPlain, capG);
-  capG.add(makeFur(buttonGeo, M.capPlain, { layers: 8, length: 0.025, density: 120, root: 0.6 }));
+  capIn.add(makeFur(crownGeo, M.cap, { layers: 5, length: 0.011, density: 110, gravity: 0.2, root: 0.72, tip: 1.06, thick: 0.9 }));
+  // raised seams between the six panels (none through the front panel), from the rim up to the button
+  const seamMat = new THREE.MeshStandardMaterial({ color: 0xb80d14, roughness: 0.9 });
+  for (let k = 0; k < 6; k++) {
+    const phi = Math.PI / 2 + (k + 0.5) * Math.PI / 3;                  // the front is +z (phi 90 deg); seams at 30, 90 and 150 deg off it, both sides
+    const pts = [];
+    for (let s = 0; s <= 20; s++) {
+      const th = lerp(Math.PI / 2, 0.1, s / 20);                         // rim .. just short of the button
+      pts.push(new THREE.Vector3(...crownXYZ(Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th), 0.004)));
+    }
+    mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.007, 6, false), seamMat, capIn);
+  }
+  const buttonGeo = new THREE.SphereGeometry(0.046, 24, 16).scale(1, 0.55, 1).translate(0, CAP.h - 0.002, 0);
+  mesh(buttonGeo, M.capPlain, capIn);
 
-  // brim: extruded half-ellipse, bent down at the sides and front
+  // bill: a crescent from the crown's front rim out to a rounded front edge, narrower than the crown, curved down at the sides
+  const bw = 0.57, rimZ = CAP.rz * Math.sqrt(1 - (bw / CAP.rx) ** 2) - 0.02;   // where the bill's sides meet the rim
   const bs = new THREE.Shape();
-  bs.moveTo(-0.78, -0.3); bs.lineTo(0.78, -0.3); bs.lineTo(0.78, 0);
-  bs.absellipse(0, 0, 0.78, 0.62, 0, Math.PI, false);
-  bs.lineTo(-0.78, -0.3);
-  const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.045, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 40 });
-  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.045, 0);
+  bs.moveTo(bw, rimZ);
+  bs.absellipse(0, rimZ, bw, CAP.rz + CAP.bill - rimZ, 0, Math.PI, false);  // outer edge, out to the bill front
+  for (let k = 0; k <= 32; k++) {                                            // inner edge back along the rim
+    const x = lerp(-bw, bw, k / 32);
+    bs.lineTo(x, (CAP.rz - 0.02) * Math.sqrt(Math.max(0, 1 - (x / (CAP.rx - 0.02)) ** 2)));
+  }
+  const brimGeo = new THREE.ExtrudeGeometry(bs, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 3, curveSegments: 40 });
+  brimGeo.rotateX(Math.PI / 2); brimGeo.translate(0, 0.015, 0);               // the slab straddles the rim line (y 0): it comes out from under the crown's edge
   const bp = brimGeo.attributes.position;
+  const rimAt = x => (CAP.rz - 0.02) * Math.sqrt(Math.max(0, 1 - (x / (CAP.rx - 0.02)) ** 2));   // the crown wall at this x: the bill's root
   for (let i = 0; i < bp.count; i++) {
     const x = bp.getX(i), z = bp.getZ(i);
-    const f = clamp(z / 0.62, 0, 1);
-    bp.setY(i, bp.getY(i) - 0.34 * (x / 0.78) ** 2 * (0.3 + 0.7 * f) - 0.04 * f * f);
+    const f = clamp((z - rimAt(x)) / (CAP.bill + 0.02), 0, 1);                // 0 where the bill leaves the crown wall .. 1 at the bill front
+    bp.setY(i, bp.getY(i) - 0.17 * (x / bw) ** 2 * (0.15 + 0.85 * f) - 0.16 * f);   // curved bill, pitched down so it shades the eyes instead of pointing at the ceiling; the root stays at the rim all the way round
   }
   brimGeo.computeVertexNormals();
-  const brim = group(capG, [0, -0.035, 0.5]); brim.rotation.x = 0.0;
+  const brim = group(capIn);
   mesh(brimGeo, M.brim, brim);
-  brim.add(makeFur(brimGeo, M.brim, { layers: 8, length: 0.022, density: 110, gravity: 0.2, root: 0.6, tip: 1.12 }));
 }
 
 // straight hair: a smooth curtain that hangs from under the cap to about jaw level, with combed strands painted on and pointed ends
+// the hem is uv.y = 1, the top row of the canvas: that band is clear except for pointed strand tips, so the hair ends in strands, not a helmet line
 const hairTex = canvasTex(1024, 256, (g, w, h) => {
-  g.fillStyle = "#4b2a13"; g.fillRect(0, 0, w, h);
+  const tip = h * 0.14;
+  g.fillStyle = "#4b2a13"; g.fillRect(0, tip, w, h - tip);
+  for (let i = 0; i < 170; i++) {                                 // strand tips poking down past the hem line
+    const x = rnd() * w, hw = 5 + rnd() * 9, l = tip * (0.3 + rnd() * 0.7);
+    g.beginPath(); g.moveTo(x - hw, tip + 2); g.lineTo(x + (rnd() - 0.5) * 4, tip - l); g.lineTo(x + hw, tip + 2); g.closePath(); g.fill();
+  }
+  g.globalCompositeOperation = "source-atop";                       // everything below paints only where there is hair
   for (let i = 0; i < 2600; i++) {                                // long straight strands running top to bottom
     const x = rnd() * w, l = 50 + rnd() * 70;
     g.strokeStyle = rnd() > 0.5 ? `rgba(120,74,38,${0.15 + rnd() * 0.25})` : `rgba(40,20,8,${0.2 + rnd() * 0.35})`;
@@ -526,33 +561,34 @@ const hairTex = canvasTex(1024, 256, (g, w, h) => {
     const y0 = rnd() * h;
     g.beginPath(); g.moveTo(x, y0); g.lineTo(x + (rnd() - 0.5) * 3, y0 + l); g.stroke();
   }
-  const sheen = g.createLinearGradient(0, 0, 0, h);                // a soft shine band, like brushed hair
-  sheen.addColorStop(0, "rgba(30,14,5,.45)"); sheen.addColorStop(0.28, "rgba(255,210,160,0)"); sheen.addColorStop(0.38, "rgba(255,205,150,.22)");
+  const sheen = g.createLinearGradient(0, 0, 0, h);                // a soft shine band, like brushed hair; darker toward the tips
+  sheen.addColorStop(0, "rgba(30,14,5,.5)"); sheen.addColorStop(0.28, "rgba(255,210,160,0)"); sheen.addColorStop(0.38, "rgba(255,205,150,.22)");
   sheen.addColorStop(0.5, "rgba(255,210,160,0)"); sheen.addColorStop(1, "rgba(30,14,5,.25)");
   g.fillStyle = sheen; g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = "source-over";
 });
 hairTex.wrapS = THREE.RepeatWrapping; hairTex.repeat.set(3, 1);
-M.hair = new THREE.MeshStandardMaterial({ map: hairTex, roughness: 0.55, bumpMap: hairTex, bumpScale: 0.6, side: THREE.DoubleSide });
+M.hair = new THREE.MeshStandardMaterial({ map: hairTex, alphaTest: 0.5, roughness: 0.55, bumpMap: hairTex, bumpScale: 0.6, side: THREE.DoubleSide });
 const hairG = group(head);
 const hairSpring = new Spring(40, 6);
 {
   // hair follows the head: full under the cap rim (so the cap sits on hair, not on air), hugging the skull down to the nape
-  const front = 1.0, nu = 150, nv = 36, capR = 0.79;
+  const front = 1.0, nu = 150, nv = 36;
   const pos = [], uv = [], idx = [];
   const ss = (a, b, x) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
   for (let i = 0; i <= nu; i++) {
     const az = front + (Math.PI * 2 - front * 2) * i / nu;           // around the back, from one cheek to the other (0 = face)
     const side = Math.abs(Math.atan2(Math.sin(az), Math.cos(az)));    // 0 at the face .. pi at the back of the head
     const nearFace = 1 - ss(front, front + 0.8, side);               // sideburns by the cheeks are shorter
-    const lock = 0.5 + 0.5 * Math.sin(az * 31 + Math.cos(az * 9) * 2);
-    const elB = lerp(-0.78, -0.3, nearFace) - 0.06 * lock;          // the hem: nape at the back, sideburns at the sides, slightly uneven
+    const lock = 0.5 + 0.5 * Math.sin(az * 13 + Math.cos(az * 5) * 2);
+    const elB = lerp(-0.85, -0.36, nearFace) - 0.04 * lock;         // the hem: nape at the back, sideburns at the sides, uneven. The last 14% of the strip is the strand tips
     const elT = 0.62;                                                // starts up inside the cap
     for (let j = 0; j <= nv; j++) {
       const el = lerp(elT, elB, j / nv);
       const x = HA * Math.sin(az) * Math.cos(el), y = HB * Math.sin(el), z = HC * Math.cos(az) * Math.cos(el);
       const hr = Math.hypot(x, z);
       const fill = 1 - ss(-0.15, 0.3, el);                            // 0 up by the cap rim, 1 lower down
-      const want = lerp(Math.max(hr + 0.04, Math.min(capR, hr + 0.16)), hr + 0.025 + 0.01 * Math.sin(az * 47), fill);
+      const want = lerp(hr + 0.02, hr + 0.022 + 0.008 * Math.sin(az * 47), fill);   // 0.02 off the skull: hair that lies flat, with the cap sitting right on it
       const k = want / Math.max(hr, 1e-3);
       pos.push(x * k, y, z * k); uv.push(i / nu, j / nv);
     }
@@ -582,6 +618,19 @@ const dotsMat = new THREE.MeshStandardMaterial({ color: 0x333348, transparent: t
 const tDots = [-0.12, 0, 0.12].map(x => mesh(sphere, dotsMat, thought, [x, 0.03, 0.14], [0.035, 0.035, 0.035]));
 thought.traverse(o => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; } });
 thought.visible = false;
+// daydreams: now and then, while idle, the bubble pops up with a little picture in it and he says nothing about it
+const DREAMS = ["🍕", "🍔", "🌭", "🌮", "🍩", "🍺", "🐱", "🐶", "🦖", "💰", "🏆", "❤️", "🎮", "⚽", "🚀", "🛸", "👽", "🏝️", "🎲", "🔮", "💤", "🤔", "🎸", "🏎️", "🐟"];
+const dreamTex = DREAMS.map(e => canvasTex(128, 128, g => { g.font = "92px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(e, 64, 70); }));
+const dreamSp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dreamTex[0], transparent: true, depthWrite: false, opacity: 0 }));
+dreamSp.position.set(0, 0.03, 0.16); dreamSp.scale.setScalar(0.4); dreamSp.frustumCulled = false; thought.add(dreamSp);
+const dream = { k: 0, on: false, until: 0, next: 25 };
+function startDream(force = false) {
+  if (!force && settings.acts.on.daydream === false) return false;
+  dreamSp.material.map = dreamTex[Math.floor(Math.random() * dreamTex.length)]; dreamSp.material.needsUpdate = true;
+  dream.on = true; dream.until = S.t + rand(4, 6);
+  if (force && !job) { nav.tx = nav.x; nav.tz = nav.z; nav.holdUntil = dream.until; nav.nextDecision = Math.max(nav.nextDecision, dream.until + 1); }   // a clicked daydream: he stops to have it
+  return true;
+}
 
 // smoke particles from the ember
 const smoke = [];
@@ -600,17 +649,6 @@ function puff(pos, strength = 1, dir = null, color = null) {
   p.v.multiplyScalar(strength);
   p.life = 0; p.max = 1.8 + Math.random() * 1.4; p.grow = 0.7 + Math.random() * 0.6; p.sp.visible = true;
   p.sp.material.rotation = Math.random() * 6;
-}
-
-// optional VRoid model: drop overlay/avatar/byte.vrm in and it replaces the built-in Gary
-let vrmRig = null;
-if (params.get("vrm") !== "0") {
-  fetch("avatar/byte.vrm", { method: "HEAD" }).then(async r => {
-    if (!r.ok) return;
-    const { loadVRM } = await import("./vrm-driver.js");
-    vrmRig = await loadVRM("avatar/byte.vrm", scene);
-    byte.visible = false;
-  }).catch(e => console.warn("VRM not loaded:", e));
 }
 
 // ------------------------------------------------------------ face drawing
@@ -654,8 +692,8 @@ function drawEye(side, i) {
   g.strokeStyle = "#2b1606"; g.lineWidth = r * 0.14; g.stroke();
   const pr = r * 0.46 * face.pupil;
   g.fillStyle = "#0d0704"; g.beginPath(); g.arc(0, 0, pr, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(-r * 0.33, -r * 0.36, r * 0.27, r * 0.22, -0.5, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "rgba(255,255,255,.95)"; g.beginPath(); g.ellipse(r * 0.33, -r * 0.36, r * 0.27, r * 0.22, 0.5, 0, Math.PI * 2); g.fill();   // toward the key light (upper right)
+  g.fillStyle = "rgba(255,255,255,.8)"; g.beginPath(); g.arc(-r * 0.32, r * 0.3, r * 0.11, 0, Math.PI * 2); g.fill();
   g.fillStyle = "rgba(255,230,200,.25)"; g.beginPath(); g.arc(0, r * 0.45, r * 0.5, 0.3, Math.PI - 0.3); g.fill();
   g.restore();
   // upper lid (sleepy / skeptical) and lower lid (smile squint), drawn inside the eye
@@ -697,7 +735,7 @@ function drawBrow(side, i) {
 }
 function drawMouth() {
   const g = fg, m = face.mouth;
-  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.68);
+  const mx = F2P.x(0) + m.shift * F2P.s * 0.08, my = F2P.y(-0.80);
   const hw = 0.145 * F2P.s * m.width * (1 - 0.45 * m.round);
   const open = m.open * (0.75 + 0.5 * m.round);
   const corner = -m.smile * hw * 0.32;                      // corners up for a smile
@@ -741,11 +779,20 @@ function drawMouth() {
   }
   g.restore();
 }
-let lastFaceKey = "";
+let lastFaceKey = "", lastFaceDraw = 0;
+function faceKey() {                                              // quantised face state as a string; gaze and pupil to 1/40 so jitter does not redraw
+  const f = face, m = f.mouth;
+  let k = "";
+  for (let i = 0; i < 2; i++) k += Math.round(f.squash[i] * 80) + "," + Math.round(f.lid[i] * 80) + "," + Math.round(f.lower[i] * 80) + "," + Math.round(f.browY[i] * 80) + "," + Math.round(f.browTilt[i] * 80) + "|";
+  return k + Math.round(f.wide * 80) + "," + Math.round(f.gx * 40) + "," + Math.round(f.gy * 40) + "," + Math.round(f.pupil * 40) + "," + Math.round(f.blush * 80) + "|" +
+    Math.round(m.open * 80) + "," + Math.round(m.width * 80) + "," + Math.round(m.round * 80) + "," + Math.round(m.smile * 80) + "," + Math.round(m.shift * 80);
+}
 function drawFace() {
-  const key = JSON.stringify(face, (k, v) => typeof v === "number" ? Math.round(v * 80) : v);
+  const key = faceKey();
   if (key === lastFaceKey) return;
-  lastFaceKey = key;
+  const now = performance.now();
+  if (now - lastFaceDraw < 1000 / 30) return;                     // at most 30 redraws a second; the key stays stale, so the next call retries
+  lastFaceDraw = now; lastFaceKey = key;
   const g = fg;
   g.clearRect(0, 0, FACE.W, FACE.H);
   for (const side of [-1, 1]) {                               // cheeks
@@ -780,7 +827,9 @@ document.addEventListener("click", () => { audioCtx(); $("unlock").style.display
 function showBubble(text) { clearTimeout(hideTimer); bubble.textContent = text; bubble.classList.add("show"); }
 function hideBubble(delay = 1500) { clearTimeout(hideTimer); hideTimer = setTimeout(() => bubble.classList.remove("show"), delay); }
 function setThinking(on) { if (on && !thinking) onThinkStart(); thinking = on; }
+let sayTimer = null, sayGen = 0;                  // a timer for text-only lines, and a counter so a stale line can't act after a newer one started
 function stopAudio() {
+  clearTimeout(sayTimer); sayTimer = null;
   if (source) { try { source.onended = null; source.stop(); } catch (e) {} source = null; }
   if (talking) onTalkEnd();
   talking = false;
@@ -791,17 +840,20 @@ function finished() {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "done" }));
 }
 async function say(msg) {
+  const my = ++sayGen;
   setThinking(false);
   stopAudio();
   showBubble(msg.text);
   onTalkStart();
   talkBL = pickBodyLang(msg.text);
-  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; setTimeout(finished, (msg.seconds || 3) * 1000); return; }
+  if (!msg.audio) { talking = true; fakeTalkUntil = performance.now() + (msg.seconds || 3) * 1000; sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000); return; }
   try {
     const c = audioCtx();
     if (c.state === "suspended") $("unlock").style.display = "block";
     const buf = await (await fetch(msg.audio)).arrayBuffer();
+    if (my !== sayGen) return;                     // a newer line started while this one was fetching
     const audio = await c.decodeAudioData(buf);
+    if (my !== sayGen) return;
     source = c.createBufferSource();
     source.buffer = audio;
     source.connect(analyser);
@@ -810,12 +862,13 @@ async function say(msg) {
     source.start();
   } catch (e) {
     console.error(e);
-    setTimeout(finished, (msg.seconds || 3) * 1000);
+    if (my === sayGen) sayTimer = setTimeout(finished, (msg.seconds || 3) * 1000);
   }
 }
 
 // avatar settings (mode, home spot, size) come from the control page through the app, or from the URL
-const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, hiddenUntil: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
+const PROPS = {};   // filled in by the prop loader below; declared up here because applySettings can run at module start (?size=)
+const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
 const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1 };
 function applySettings(set = {}) {
   if (set.mode && ["stay", "wander", "roam", "walkon"].includes(set.mode)) { settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true; }
@@ -829,25 +882,57 @@ function applySettings(set = {}) {
     if (typeof a.sfx === "boolean") settings.acts.sfx = a.sfx;
     if (typeof a.scene === "string" && SCENES[a.scene] && a.scene !== settings.acts.scene) {
       settings.acts.scene = a.scene;
-      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && job.def.manual && !job.def.event) endJob(); }
+      if (a.sceneAt === undefined || Math.abs(Date.now() - a.sceneAt) < 15000) { const f = SCENES[a.scene].first; if (f) doActivity(f); else if (job && !job.def.event && (!sceneAllows(job.name) || scene_().stick !== job.name)) endJob(); }   // the new scene ends whatever it doesn't allow (leaving gaming ends the desk job)
     }
   }
-  if (set.do && set.do.name && Math.abs(Date.now() - (set.do.at || 0)) < 15000) doActivity(set.do.name, set.do);   // one-shot from the control page or an app event (ignored when replayed later)
+  if (set.do && set.do.name) {                                     // one-shot from the control page or an app event (ignored when replayed later)
+    const fresh = Math.abs(Date.now() - (set.do.at || 0)) < 15000;
+    const result = fresh ? doClicked(set.do.name, set.do) : "ignored: older than 15 s";
+    tell({ type: "did", name: set.do.name, result: result || "started" });   // the app logs it, so a missing reaction can be traced
+  }
+}
+// A click on the control page or dock. Bits and activities can't run while he talks or thinks (the talk drive cancels them),
+// and cutting a running activity off snaps him out of his pose, so those clicks wait their turn: queuedDo plays when he is free.
+let queuedDo = null;
+function doClicked(name, info = {}) {
+  const ev = name === "stop" || name === "redeem" || JOBS[name]?.event;
+  if (ev || !(BITS[name] || JOBS[name] || name === "daydream")) { queuedDo = null; return doActivity(name, info); }
+  const off = currentMode() === "walkon" && nav.offscreen;
+  if (!(talking || thinking || Math.max(S.talk, S.think) > 0.05) && !off && !(job && job.phase !== "go")) {
+    queuedDo = null;
+    if (name === "embarrassed") { job = null; act = { name: null, t0: 0, dur: 0 }; }   // a click always blushes, even on the way somewhere
+    return doActivity(name, info);
+  }
+  if (job && job.phase === "do" && !job.def.event) endJob();     // get up / put things down first
+  if (off) nav.lingerUntil = S.t + 12;                           // walk-on mode: come on screen to do it
+  queuedDo = { name, info, t: S.t, arrive: off };
+  return talking || thinking ? "queued: plays when he finishes talking" : job ? "queued: plays when he finishes " + job.name : "queued: walking on first";
+}
+function runQueuedDo(want, busy) {                             // called every frame from update()
+  if (!queuedDo) return;
+  if (S.t - queuedDo.t > 60) { tell({ type: "did", name: queuedDo.name, result: "dropped: he stayed busy for a minute" }); queuedDo = null; return; }
+  if (want || busy > 0.05 || job || (queuedDo.arrive && (nav.offscreen || nav.moving > 0.1))) return;
+  const q = queuedDo; queuedDo = null;
+  tell({ type: "did", name: q.name, result: "played after waiting: " + (doActivity(q.name, q.info) || "started") });
 }
 function doActivity(name, info = {}) {
-  if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return; }
+  audioCtx();                                                       // a user-visible event: set up the audio context if it isn't yet
+  if (name === "stop") { endJob(); act = { name: null, t0: 0, dur: 0 }; return "stopped"; }
+  if (job && job.def.event && !(JOBS[name] && JOBS[name].event)) return "skipped: a stream event is playing";   // bits and redeems wait for it to end
   if (name === "redeem") {                                          // a channel point redeem: show it, and act it out if the title suggests something
     const title = String(info.title || "a redeem"), who = String(info.who || "someone");
     showBanner(`${who.toUpperCase()} REDEEMED ${title.toUpperCase()}`.slice(0, 48), "#2ec4b6", 4.5); sfx("chime");
     const hit = REDEEM_MAP.find(([re]) => re.test(title.toLowerCase()));
-    if (hit) { if (JOBS[hit[1]]?.prop && !PROPS[JOBS[hit[1]].prop]) return; setTimeout(() => doActivity(hit[1], info), 400); }
+    if (hit) { if (JOBS[hit[1]]?.prop && !PROPS[JOBS[hit[1]].prop]) return "skipped: the prop isn't loaded"; setTimeout(() => doActivity(hit[1], info), 400); }
     else { head.getWorldPosition(V1); for (let i = 0; i < 5; i++) floater(V1.clone().add(V2.set(rand(-0.8, 0.8), 0.6, 0).multiplyScalar(settings.size)), starTex, V3.set(0, 0.35, 0).multiplyScalar(settings.size)); startGesture(["dance", "airguitar", "sneeze", "yawn"][Math.floor(Math.random() * 4)]); }
     return;
   }
-  if (name === "embarrassed" && (job || act.name)) return;            // only when he is free
-  if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return; pendingInfo = info || {}; }
-  if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; startGesture(name); }
+  if (name === "daydream") { startDream(true); return; }
+  if (name === "embarrassed" && (job || act.name)) return "skipped: busy";   // only when he is free
+  if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return "skipped: turned off on the control page"; pendingInfo = info || {}; }
+  if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; nav.holdUntil = S.t + BITS[name]; if (currentMode() === "walkon") nav.lingerUntil = Math.max(nav.lingerUntil || 0, S.t + BITS[name] + 3); startGesture(name); }
   else if (JOBS[name]) { job = null; startJob(name, true); }
+  else return "ignored: unknown reaction";
 }
 {
   const m = params.get("mode"); if (m) applySettings({ mode: m });
@@ -859,6 +944,7 @@ function currentMode() { return (typeof SCENES !== "undefined" && SCENES[setting
 
 // websocket to the app, reconnecting with backoff (1 s growing to 10 s) whenever the app is down or restarts
 let wsDelay = 1000, wsTimer = null;
+function tell(o) { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} }   // a note back to the app, dropped while it is down
 function scheduleReconnect() {
   if (wsTimer) return;
   const d = wsDelay * (0.8 + Math.random() * 0.4);
@@ -871,8 +957,13 @@ function connect() {
   ws = sock;
   ws.onopen = () => { wsDelay = 1000; ws.send(JSON.stringify({ type: "hello", role: "overlay" })); };
   ws.onmessage = ev => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "config") { if (msg.name) botName = msg.name; if (msg.avatar) applySettings(msg.avatar); }
+    audioCtx();                                 // first message: set up the audio context now (audioCtx resumes it if suspended)
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { console.error("bad frame from app", e); return; }
+    if (msg.type === "config") {
+      if (msg.name) botName = msg.name;
+      if (msg.build) { if (overlayBuild && msg.build !== overlayBuild) { location.reload(); return; } overlayBuild = msg.build; }
+    }
     else if (msg.type === "avatar") applySettings(msg.set || msg);
     else if (msg.type === "thinking") setThinking(true);
     else if (msg.type === "say") say(msg);
@@ -892,10 +983,12 @@ const debug = {
   setYaw: y => { nav.fixedYaw = (typeof y === "number") ? y : null; },
   setMode: m => applySettings({ mode: m }),
   gesture: name => startGesture(name),
-  doActivity: name => doActivity(name), endJob: () => endJob(), get job() { return job && { name: job.name, phase: job.phase, w: +job.w.toFixed(2) }; }, get props() { return Object.keys(PROPS); },
+  get run() { return +(nav.run || 0).toFixed(2); }, propAt: k => PROPS[k] && PROPS[k].inst.root.position.toArray().map(v => +v.toFixed(2)), xMax: () => +xMaxAt(nav.z, settings.size).toFixed(2),
+  get dream() { return { on: dream.on, k: +dream.k.toFixed(2) }; }, doActivity: name => doActivity(name), doClicked: name => doClicked(name), get queued() { return queuedDo && queuedDo.name; }, endJob: () => endJob(), get job() { return job && { name: job.name, phase: job.phase, w: +job.w.toFixed(2) }; }, get props() { return Object.keys(PROPS); },
   debugAct: () => ({ act: act.name, t: +S.t.toFixed(2), t0: act.t0, w: +J.w.toFixed(2), wP: +J.wP.toFixed(2), moving: +nav.moving.toFixed(2), busy: +Math.max(S.talk, S.think).toFixed(2) }),
   screenPos: () => { const v = byte.position.clone(); v.y += 1.2 * settings.size; v.project(camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; },
   teleport: (x, z) => { nav.x = x; nav.z = z; },
+  hands: () => [armN, armP].map(a => { const v = new THREE.Vector3(); a.hand.getWorldPosition(v); return v.toArray().map(n => +n.toFixed(2)); }),
   step: (n = 60, dt = 1 / 30) => { for (let i = 0; i < n; i++) update(dt); return { x: +nav.x.toFixed(2), z: +nav.z.toFixed(2), yaw: +nav.yaw.toFixed(2), moving: +nav.moving.toFixed(2), off: nav.offscreen, mode: currentMode() }; },
   get J() { return J; }, get bulb() { return [bulbAt, thinkStart, S.think, thinkStyle]; }, get cigOn() { return cig.visible; }, itemInfo: k => { const r = ITEMS[k]?.root; return r && { vis: r.visible, pos: r.position.toArray().map(v => +v.toFixed(2)), s: +r.scale.x.toFixed(2), parent: r.parent?.type }; },
   scene: name => applySettings({ acts: { scene: name } }), event: (name, info = {}) => doActivity(name, info), get items() { return Object.keys(ITEMS); }, get fx() { return Object.keys(FX); },
@@ -916,7 +1009,7 @@ if (DEMO && !params.has("preview")) {
 }
 
 // ------------------------------------------------------------ animation state
-const S = {   // shared animation state (also fed to the VRM driver)
+const S = {   // shared animation state
   t: 0, level: 0, talk: 0, think: 0, blink: 0, gaze: { x: 0, y: 0 }, x: 0, yaw: 0,
   walkPhase: 0, moving: 0, hop: 0, nod: 0, tilt: 0, headYaw: 0,
 };
@@ -939,7 +1032,7 @@ function onTalkEnd() { nav.lingerUntil = S.t + 5; }
 function startGesture(name) {
   const durs = { drag: 3.4, scratch: 2.0, cap: 1.8, wave: 1.6, stretch: 2.2, ...BITS };
   if (!durs[name]) return;
-  act = { name, t0: S.t, dur: durs[name] };
+  act = { name, t0: S.t, dur: durs[name], side: Math.sin(nav.yaw) > 0.05 ? -1 : 1 };   // scratch and cap use the hand on the side nearer the camera, so it is not hidden behind his head
   fired.clear();
 }
 
@@ -949,30 +1042,30 @@ const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 const clock = new THREE.Clock();
 
 // arm poses: shoulder quaternion + elbow bend. Static poses from Euler angles, reach poses from two-bone IK.
-const ARM = { L1: 0.26, L2: 0.22, reach: 0.26 + 0.22 + 0.04 };
+// the arm's rest geometry as the model built it, read once before the first stretch: joint and mesh offsets, and the bone lengths (L1 shoulder to elbow, L2 elbow to hand)
+function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, up: arm.up.position.y, fore: arm.fore.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
 const eulerPose = (sx, sy, sz, ex) => ({ q: new THREE.Quaternion().setFromEuler(new THREE.Euler(sx, sy, sz)), ex });
 const POSE = {
-  rest: s => eulerPose(0.05, 0, 0.18 * s, -0.25),
-  wave: s => eulerPose(-2.1, 0, 0.9 * s, -1.0),
+  rest: s => eulerPose(0.0, 0, 0.10 * s, -0.5),           // arms hang by his sides, elbows a little bent, hands in front of the hips: not a starfish
   gestureOut: s => eulerPose(-0.9, 0, 0.85 * s, -1.1),
   gestureUp: s => eulerPose(-1.6, 0, 0.5 * s, -1.6),
   gesturePoint: s => eulerPose(-1.3, -0.3 * s, 0.25 * s, -0.4),
   shrug: s => eulerPose(-0.5, 0, 1.0 * s, -2.0),
-  up: s => eulerPose(-2.9, 0, 0.35 * s, -0.3),
+  up: s => eulerPose(-2.7, 0, 0.7 * s, -0.3),              // arms up and out, so the hands show beside the cap instead of behind the head
 };
 const _m4 = new THREE.Matrix4(), _ax = new THREE.Vector3(), _ay = new THREE.Vector3(), _az = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3();
 function reachPose(arm, target) {            // target in torso space; returns a pose whose hand lands on (or points at) the target
-  const S = arm.sh.position;
+  const SP = arm.sh.position, R = armRest(arm), reachMax = R.L1 + R.L2 + 0.04;
   if (target.y > 0 && target.y < 0.69) {                       // a hand target inside his belly gets pushed out to the shirt
     const ez = target.z / 0.86, d = Math.hypot(target.x, ez), r = bodyR(target.y) + 0.075;
     if (d < r) { if (d < 1e-3) target = new THREE.Vector3(0, target.y, r * 0.86); else target = new THREE.Vector3(target.x / d * r, target.y, ez / d * r * 0.86); }
   }
-  _d.copy(target).sub(S);
+  _d.copy(target).sub(SP);
   const want = _d.length();
-  const k = clamp(want / (ARM.reach - 0.01), 1, 1.7);          // cartoon stretch when the target is out of reach (his head is huge)
-  const dist = clamp(want, 0.08, (ARM.reach - 0.01) * k);
+  const k = clamp(want / (reachMax - 0.01), 1, 1.25);          // cartoon stretch when the target is out of reach, capped at 1.25x so the arm never rubber-bands
+  const dist = clamp(want, 0.08, (reachMax - 0.01) * k);
   _d.normalize();
-  const L1 = ARM.L1 * k, L2 = (ARM.L2 + 0.04) * k;
+  const L1 = R.L1 * k, L2 = (R.L2 + 0.04) * k;
   const cosE = clamp((L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2), -1, 1);
   const cosS = clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1);
   const bend = Math.PI - Math.acos(cosE), offset = Math.acos(cosS);
@@ -996,7 +1089,8 @@ function applyArm(arm, p, dt, rate = 7) {
   arm.sh.quaternion.copy(u.p.q);
   arm.el.rotation.x = u.p.ex;
   const k = u.p.k ?? 1;                                       // stretch the arm along its length
-  arm.el.position.y = -0.26 * k; arm.up.position.y = -0.18 * k; arm.up.scale.y = k; arm.fore.position.y = -0.1 * k; arm.fore.scale.y = k; arm.hand.position.y = -0.22 * k;
+  const R = armRest(arm);                                     // offsets come from the built model, so bone changes made there carry through
+  arm.el.position.y = R.el * k; arm.up.position.y = R.up * k; arm.up.scale.y = k; arm.fore.position.y = R.fore * k; arm.fore.scale.y = k; arm.hand.position.y = R.hand * k;
   keepArmOut(arm, k, p.reach);
 }
 // keep the arm outside his belly: swing the shoulder out until the upper arm, elbow, forearm and hand clear the body
@@ -1005,7 +1099,7 @@ function bodyR(y) {
   for (let i = 1; i < BODY_R.length; i++) if (y <= BODY_R[i][1]) { const [r0, y0] = BODY_R[i - 1], [r1, y1] = BODY_R[i]; return lerp(r0, r1, (y - y0) / (y1 - y0)); }
   return 0;
 }
-const ARM_PTS = [["sh", -0.13, 0.062, 0], ["el", 0, 0.06, 0], ["el", -0.1, 0.058, 1], ["hand", -0.04, 0.068, 1]];   // last: 0 = elbow end, 1 = hand end
+const ARM_PTS = [["sh", -0.15, 0.07, 0], ["el", 0, 0.064, 0], ["el", -0.13, 0.064, 1], ["hand", -0.04, 0.068, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
 const _kp = new THREE.Vector3(), _kh = new THREE.Vector3(), _kq = new THREE.Quaternion();
 function armHit(arm, k, which) {            // deepest point of this end of the arm inside the body: {pen, p, r}
   let best = null;
@@ -1020,12 +1114,12 @@ function armHit(arm, k, which) {            // deepest point of this end of the 
   return best;
 }
 function keepArmOut(arm, k, reach) {
-  const S = arm.sh.position;
+  const SP = arm.sh.position;
   for (let pass = 0; pass < 6; pass++) {
     arm.sh.updateMatrixWorld(true);
     let h = reach ? null : armHit(arm, k, 1);
     if (h) {                                 // hand or forearm inside: swing the whole arm so the hand comes out (mostly forward when it's in front)
-      const v = h.p.sub(S), len = v.length(); if (len < 0.05) return;
+      const v = h.p.sub(SP), len = v.length(); if (len < 0.05) return;
       const axis = v.clone().cross(h.r); if (axis.lengthSq() < 1e-8) axis.set(0, 0, arm.side);
       arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(axis.normalize(), Math.min(0.5, (h.pen + 0.005) / len)));
       continue;
@@ -1033,7 +1127,7 @@ function keepArmOut(arm, k, reach) {
     h = armHit(arm, k, 0); if (reach) { const h2 = armHit(arm, k, 1); if (h2 && (!h || h2.pen > h.pen)) h = h2; }
     if (!h) return;                          // elbow inside: turn the arm around the shoulder-hand line so the hand stays put and the elbow pokes out
     _kh.set(0, -0.04, 0); arm.hand.localToWorld(_kh); torso.worldToLocal(_kh);
-    const ax = _kh.sub(S).normalize(), v = h.p.sub(S), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
+    const ax = _kh.sub(SP).normalize(), v = h.p.sub(SP), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
     const rt = h.r.clone().sub(ax.clone().multiplyScalar(ax.dot(h.r)));
     if (dist < 0.03 || rt.lengthSq() < 0.05) {
       if (reach) return;                     // can't swing it clear without moving the hand off what it holds
@@ -1093,21 +1187,20 @@ const JOBS = {
 };
 const JOBS3 = new Set(["floorsit", "snack", "read", "ball", "fishing", "exercise", "punch", "yoga", "beer", "plant", "paint", "sign", "marble", "goodbye", "raid", "sub", "bits", "follow", "hype", "rip"]);
 const ACT_NAMES = [...Object.keys(BITS), ...Object.keys(JOBS)];
-settings.acts = { on: Object.fromEntries(ACT_NAMES.map(n => [n, true])), gap: 1, props: "use", scene: "normal", sfx: true };
+settings.acts = { on: Object.fromEntries([...ACT_NAMES, "daydream"].map(n => [n, true])), gap: 1, props: "use", scene: "normal", sfx: true };
 
 // props live in overlay/props/*.js and pop in when he goes to use them. Slots: fx = fraction of the screen half-width, fz = 0 far .. 1 near.
 const PROP_SLOTS = {
   djdeck: { fx: -0.78, fz: 0.15, yaw: 0.22, half: 0.75 },
   couch:  { fx: 0.80,  fz: 0.10, yaw: -0.22, half: 1.0 },
   bed:    { fx: -0.74, fz: 0.02, yaw: 0.12, half: 1.55 },
-  arcade: { fx: 0.9,   fz: 0.25, yaw: -1.25, half: 0.5 },
+  arcade: { fx: 0.55,  fz: 0.25, yaw: -0.75, half: 0.5 },
   desk:   { fx: 0.8,   fz: 0.35, yaw: -0.25, half: 0.85 },
-  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.25 },
+  gym:    { fx: -0.5,  fz: 0.45, yaw: 0.12, half: 1.45 },
   fridge: { fx: -0.9,  fz: 0.3,  yaw: 0.55, half: 0.45 },
   plant:  { fx: 0.55,  fz: 0.55, yaw: -0.2, half: 0.3 },
   easel:  { fx: -0.55, fz: 0.4,  yaw: 0.3,  half: 0.6 },
 };
-const PROPS = {};
 let headphones = null;
 for (const name of Object.keys(PROP_SLOTS)) {
   import(`./props/${name}.js`).then(m => {
@@ -1115,7 +1208,7 @@ for (const name of Object.keys(PROP_SLOTS)) {
     inst.root.visible = false;
     inst.root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
     scene.add(inst.root);
-    PROPS[name] = { inst, slot: PROP_SLOTS[name], spring: new Spring(140, 13), shown: false, linger: 0, st: { active: false } };
+    PROPS[name] = { key: name, inst, slot: PROP_SLOTS[name], spring: new Spring(140, 13), shown: false, linger: 0, st: { active: false } };
     if (m.buildHeadphones) {
       headphones = m.buildHeadphones(THREE, { mesh, group, sphere, canvasTex }).root;
       headphones.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
@@ -1123,8 +1216,15 @@ for (const name of Object.keys(PROP_SLOTS)) {
     }
   }).catch(e => console.warn(`prop ${name} not loaded:`, e));
 }
-function placeProp(p) {
-  const size = settings.size, s = p.slot;
+// Each time a prop pops in it gets a new random spot (either side, any depth), turned toward the middle and clear of the other
+// props that are out. A re-layout (new size or frame) keeps the spot it has. PROP_SLOTS only gives its size and how far it turns.
+function propSpot(p) {
+  const s = p.slot;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  return { fx: side * rand(0.3, 0.95), fz: rand(0, 0.6), yaw: -side * Math.abs(s.yaw) * rand(0.6, 1.3), half: s.half };
+}
+function setPropAt(p, s) {
+  const size = settings.size;
   const z = lerp(stage.zFar, stage.zNear, s.fz);
   const xm = xMaxAt(z, size);
   const x = Math.sign(s.fx) * Math.max(0, Math.abs(s.fx) * xm - s.half * size);
@@ -1132,8 +1232,47 @@ function placeProp(p) {
   p.inst.root.rotation.y = s.yaw;
   p.inst.root.scale.setScalar(size);
   p.inst.root.updateMatrixWorld(true);
+  p.foot = new THREE.Box3().setFromObject(p.inst.root).expandByScalar(0.3);   // footprint for the walk (cached until the prop is placed again)
+}
+function placeProp(p) {
+  const fresh = !p.shown && (!p.spot || S.t - p.spotAt > 1);        // a job places it just before it pops in: that is the same placement
+  if (!fresh) { setPropAt(p, p.spot); return; }
+  const others = Object.values(PROPS).filter(o => o !== p && o.foot && (o.shown || S.t - (o.spotAt ?? -9) < 1));
+  let best = null;
+  for (let i = 0; i < 14; i++) {
+    const spot = i < 13 ? propSpot(p) : p.slot;                     // the old fixed slot is the last resort
+    setPropAt(p, spot);
+    if (!others.some(o => o.foot.intersectsBox(p.foot)) && !p.foot.containsPoint(V1.set(nav.x, 0.5, nav.z))) { best = spot; break; }
+  }
+  p.spot = best || p.slot; p.spotAt = S.t;
+  setPropAt(p, p.spot);
+}
+// walks avoid shown props: random targets and walk midpoints are re-drawn when they land inside a footprint
+function propBlocked(x, z) {
+  for (const p of Object.values(PROPS)) { const f = p.foot; if (p.shown && f && x > f.min.x && x < f.max.x && z > f.min.z && z < f.max.z) return true; }
+  return false;
+}
+const walkBlocked = (x, z) => propBlocked(x, z) || propBlocked((x + nav.x) / 2, (z + nav.z) / 2);
+function freeTarget(gen) {                     // up to 8 draws from gen; keeps the old target when none is clear
+  for (let i = 0; i < 8; i++) { const [x, z] = gen(); if (!walkBlocked(x, z)) return [x, z]; }
+  return [nav.tx, nav.tz];
+}
+function freeX(x, z, xm) {                     // a job's stage spot at depth z: the same x if clear, else up to 8 other x in the stage; keeps x when none is clear
+  if (!walkBlocked(x, z)) return x;
+  for (let i = 0; i < 8; i++) { const cx = rand(-xm, xm); if (!walkBlocked(cx, z)) return cx; }
+  return x;
 }
 const propPt = (p, x, y, z) => p.inst.root.localToWorld(new THREE.Vector3(x, y, z));
+const _anchorWarned = new Set();
+function anchorsOf(p) {                                       // a renamed or missing prop anchor gets a stand-in at the prop's middle (warned once) instead of throwing
+  const A = p?.inst?.anchors || {};
+  return new Proxy(A, { get(t, k) {
+    if (typeof k !== "string" || k in t) return t[k];
+    const tag = (p?.key || "prop") + "." + k;
+    if (!_anchorWarned.has(tag)) { _anchorWarned.add(tag); console.warn("missing prop anchor", tag); }
+    return new THREE.Vector3(0, 0.6, 0);
+  } });
+}
 function poof(pos, n = 14, r = 0.9, color = null) {
   for (let i = 0; i < n; i++) {
     const a = i / n * Math.PI * 2;
@@ -1201,20 +1340,21 @@ function startJob(name, force = false) {
     const p = job.p;
     if (!p.shown) placeProp(p);
     const u = p.inst.spots.use;
+    job.spot = u;
     if (name === "dj") {                                       // round the side of the table to get behind it
       const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || 1);
       job.path = [propPt(p, side * 1.05, 0, 0.6), propPt(p, side * 1.05, 0, u.z), propPt(p, u.x, 0, u.z)];
-    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];
+    } else if (name === "arcade") job.path = [propPt(p, u.x, 0, u.z)];   // job.spot (set above) gives him the cabinet's facing: spotYaw
     else if (name === "couch") job.path = [propPt(p, u.x, 0, u.z + 0.75)];
-    else if (name === "nap") job.path = [propPt(p, -0.35, 0, 1.0)];
+    else if (name === "nap") job.path = [propPt(p, u.x, 0, u.z + 0.9)];   // walk to the foot end first, so the lie-down starts where he stands
     else if (name === "desk" || name === "desknap") { const side = Math.sign(p.inst.root.worldToLocal(new THREE.Vector3(nav.x, 0, nav.z)).x || -1); job.path = [propPt(p, side * 1.1, 0, 0.6), propPt(p, side * 1.1, 0, u.z - 0.1), propPt(p, u.x, 0, u.z - 0.1)]; }   // round the side of the desk to the chair
   } else if (name === "stare") {
     const z = stage.zNear;
-    job.path = [new THREE.Vector3(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), z, xMaxAt(z, size) * 0.6), 0, z)];
   } else if (name === "butterfly") { job.path = []; job.phase = "do"; job.t0 = S.t; job.until = S.t + 15; job.at = { x: nav.x, z: nav.z }; bfStart(); return true;
   } else if (name === "lieback") {                               // lie along the bottom edge of the screen; further back he'd look like he floats in mid-air (the overlay has no visible floor)
     const z = lerp(stage.zNear, stage.zFar, 0.12), xm = Math.max(0, xMaxAt(z, size) - 1.8 * size);
-    job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)];
+    job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)];
   } else job.path = [new THREE.Vector3(nav.x, 0, nav.z)];
   if (name === "lieback") job.dir = job.path[0].x > 0 ? -1 : 1;            // head toward the middle of the screen
   return true;
@@ -1231,7 +1371,7 @@ function startle() {                                          // drops what he's
 }
 function jobUpdate(t, dt, want, mode, size) {           // returns a nav target {x, z, speed} while a job steers him
   if (!job) {
-    if (!want && t > nextJob && !act.name && !nav.offscreen && mode !== "walkon") {
+    if (!want && t > nextJob && !act.name && !queuedDo && !nav.offscreen && mode !== "walkon") {
       const sc = scene_(), opts = Object.keys(JOBS).filter(n => (n !== lastJob || sc.stick === n) && !JOBS[n].manual && sceneAllows(n) && canDo(n, mode));
       if (opts.length) startJob(opts[Math.floor(Math.random() * opts.length)]);
       nextJob = t + (sc.stick ? 2 : rand(25, 55) * actGap());
@@ -1306,7 +1446,7 @@ function bfGround(size) {                                       // where he runs
 function bfUpdate(t, dt) {
   if (!bf.g.visible) return;
   const size = settings.size, k = t - bf.t0, sd = bf.seed;
-  const cap = tmp.set(0, 0.95, -0.05); capG.localToWorld(cap);
+  const cap = tmp.set(0, CAP.h - 0.05, -0.05); capG.localToWorld(cap);        // just above the crown button (the cap rim sits 0.07 below capG)
   let p;
   if (bf.leave && t - bf.leave > 0) {                                    // flies away up and off
     const q = t - bf.leave; p = bf.pos.clone().add(new THREE.Vector3(Math.sin(q * 3) * 0.02 + 0.03, 0.04, 0).multiplyScalar(size * 40 * dt));
@@ -1475,7 +1615,7 @@ function poseJob(t, dt) {
     J.torsoX = -0.28;
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(8, 16); }
     if (job.sub === 0) { J.armN = reachPose(armN, headPoint(-1.75, -0.1, 0.06)); J.armP = reachPose(armP, headPoint(1.75, -0.1, 0.06)); }      // hands behind head
-    else if (job.sub === 1) { J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, toTorso(propPt(p, p.inst.anchors.armrest.x, p.inst.anchors.armrest.y + 0.06, p.inst.anchors.armrest.z))); }
+    else if (job.sub === 1) { J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, toTorso(propPt(p, anchorsOf(p).armrest.x, anchorsOf(p).armrest.y + 0.06, anchorsOf(p).armrest.z))); }
     else { const munch = Math.max(0, Math.sin(t * 1.3)); J.armN = reachPose(armN, tp(-0.12, 0.15, 0.32)); J.armP = reachPose(armP, munch > 0.5 ? headPoint(0.15, -0.72, 0.12) : tp(0.42, 0.1, 0.2)); }
     J.wN = J.wP = k;
     J.neck = [-0.05, 0.2 * Math.sin(t * 0.25), 0.1]; J.neckW = k;
@@ -1498,7 +1638,7 @@ function poseJob(t, dt) {
     if (asleep && k > 0.8 && t > nextFloat) { head.getWorldPosition(tmp); tmp.y += 0.55 * size; floater(tmp, zTex, tmp2.set(0.12, 0.3, 0.05).multiplyScalar(size)); nextFloat = t + 1.4; }
     p.st = { active: k > 0.5, breath };
   } else if (name === "dj") {
-    const p = job.p, A = p.inst.anchors;
+    const p = job.p, A = anchorsOf(p);
     const beat = (t * 2.05) % 1;
     J.yaw = p.slot.yaw;
     if (t > job.nextSub) { job.sub = Math.random() < 0.25 ? 2 : Math.floor(Math.random() * 2); job.nextSub = t + rand(4, 9); }
@@ -1530,7 +1670,7 @@ function poseJob(t, dt) {
     J.face = fs => { fs.mouth.smile += 0.6; fs.mouth.open = Math.max(fs.mouth.open, onCap ? 0.35 : 0.2); fs.browY = fs.browY.map(v => v + 0.6); if (onCap) { fs.gx = 0; fs.gy = 1; fs.wide += 0.3; } };
     if (onCap) J.look = { x: 0, y: 1 };
   } else if (name === "desk" || name === "desknap") {
-    const p = job.p, u = p.inst.spots.use, A = p.inst.anchors, asleep = name === "desknap" && job.phase === "do" && t - job.t0 > 4;
+    const p = job.p, u = p.inst.spots.use, A = anchorsOf(p), asleep = name === "desknap" && job.phase === "do" && t - job.t0 > 4;
     const seat = propPt(p, u.x, u.y - 0.46, u.z - 0.1)   // a little back so his belly clears the desk;
     J.root = seat; J.rootQ = jv.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.slot.yaw).clone(); J.rootW = k;
     J.legs = SIT_LEGS.map((l, i) => ({ ...l, z: i ? 0.1 : -0.1 })); J.legW = k;
@@ -1567,8 +1707,8 @@ function poseJob(t, dt) {
     }
     p.st = { active: k > 0.5 && !asleep, typing, asleep };
   } else if (name === "arcade") {
-    const p = job.p, A = p.inst.anchors;
-    J.yaw = p.slot.yaw + Math.PI;
+    const p = job.p, A = anchorsOf(p);
+    J.yaw = p.slot.yaw + ((job.spot && job.spot.yaw) || 0);     // the cabinet spot's facing (profile, so the screen shows)
     if (t > job.nextSub) { job.sub = Math.random() < 0.2 ? 1 + Math.floor(Math.random() * 2) : 0; job.nextSub = t + (job.sub ? 1.6 : rand(4, 9)); }
     const stick = { x: Math.sin(t * 5.3) * Math.sin(t * 1.3), y: Math.sin(t * 3.7) * 0.6 };
     const press = [Math.sin(t * 17) > 0.3, Math.sin(t * 11 + 1) > 0.6, Math.sin(t * 7 + 2) > 0.7];
@@ -1684,13 +1824,14 @@ function tone(type, f0, f1, dur, vol = 0.3, delay = 0, vib = 0) {
   g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g); g.connect(sfxBus); o.start(t0); o.stop(t0 + dur + 0.05);
 }
+let noiseBuf = null;                                // one 2 s white-noise buffer, reused by every noise() (each play is cut to its own length)
 function noise(dur, vol = 0.3, delay = 0, freq = 1000, ftype = "bandpass") {
-  const c = sfxOut(), t0 = c.currentTime + delay, n = Math.ceil(c.sampleRate * dur), b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const c = sfxOut(), t0 = c.currentTime + delay;
+  if (!noiseBuf) { noiseBuf = c.createBuffer(1, Math.ceil(c.sampleRate * 2), c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
   const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
-  s.buffer = b; f.type = ftype; f.frequency.value = freq;
+  s.buffer = noiseBuf; f.type = ftype; f.frequency.value = freq;
   g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0);
+  s.connect(f); f.connect(g); g.connect(sfxBus); s.start(t0, 0, dur);
 }
 const SFX = {
   pop: () => tone("sine", 500, 1100, 0.12, 0.3),
@@ -1750,7 +1891,8 @@ function eventStart(name, info, size) {
   }
   job.at = { x: nav.x, z: nav.z };
   const B = {
-    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"], sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : `NEW SUB: ${who}!`, "#8a5cff"],
+    raid: [`${who} IS RAIDING!${n ? `  ${n} RAIDERS` : ""}`, "#ff3b6b"],
+    sub: [+job.info.months > 1 ? `${who} RESUBBED x${job.info.months}!` : n > 1 ? `${n} GIFT SUBS FROM ${who}!` : `NEW SUB: ${who}!`, "#8a5cff"],
     bits: [`${n ? n + " " : ""}BITS FROM ${who}!`, "#ffb300"], follow: [`THANKS FOR THE FOLLOW, ${who}!`, "#2ec4b6"], hype: ["CHAT IS HYPED!", "#ff6b00"], rip: ["RIP DUM  o7", "#6b7280"],
   }[name];
   showBanner(B[0], B[1], (job.until - S.t) - 0.4);
@@ -1910,9 +2052,9 @@ function startJob3(name, size) {
     job.spot = s;
     job.path = [propPt(p, s.x, 0, s.z + 0.4), propPt(p, s.x, 0, s.z)];
   } else if (job.def.event) eventStart(name, pendingInfo, size);
-  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(clamp(nav.x, -xm, xm), 0, z)]; }
+  else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)]; }
   else if (name === "goodbye") job.path = [new THREE.Vector3(0, 0, lerp(stage.zFar, stage.zNear, 0.7))];
-  else if (name === "sign") job.path = [new THREE.Vector3(clamp(nav.x, -1.5 * size, 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
+  else if (name === "sign") job.path = [new THREE.Vector3(freeX(clamp(nav.x, -1.5 * size, 1.5 * size), lerp(stage.zFar, stage.zNear, 0.6), 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
   else if (name === "chatfloor") job.path = [new THREE.Vector3(clamp(nav.x, -1.5, 1.5), 0, stage.zNear)];
   if (name === "read") { job.kind = Math.random() < 0.5 ? "paper" : "book"; job.seated = job.kind === "book" && Math.random() < 0.6; }
   if (name === "snack") job.food = Math.random() < 0.5 ? "pizza" : "chips";
@@ -1922,8 +2064,8 @@ function startJob3(name, size) {
 }
 
 // ---- jobs: what he does there
-const FLOOR_LEGS = [{ hp: -1.35, kn: 2.5, ft: 0.4, z: -0.75 }, { hp: -1.35, kn: 2.5, ft: 0.4, z: 0.75 }];
-function sitFloor(k, size, drop = 0.34) {
+const FLOOR_LEGS = [{ hp: -1.57, kn: 0.15, ft: 0.25, z: -0.35 }, { hp: -1.57, kn: 0.15, ft: 0.25, z: 0.35 }];   // legs out in front, heels on the floor (was a kneel: the shins folded back)
+function sitFloor(k, size, drop = 0.30) {
   J.root = new THREE.Vector3(job.at.x, -drop * size, job.at.z); J.rootQ = new THREE.Quaternion(); J.rootW = k;
   J.legs = FLOOR_LEGS; J.legW = k;
 }
@@ -1973,13 +2115,13 @@ function ballUpdate(t, dt, size) {
   b.rot.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(dt * 9, dt * 4, 0)));
 }
 function poseJob3(name, t, dt, k) {
-  const size = settings.size, k2 = t - (job.d0 ?? job.t0), p = job.p, A = p ? p.inst.anchors : null;
+  const size = settings.size, k2 = t - (job.d0 ?? job.t0), p = job.p, A = p ? anchorsOf(p) : null;
   const spotYaw = p ? p.slot.yaw + ((job.spot && job.spot.yaw) || 0) : 0;
   if (name === "floorsit") {
     sitFloor(k, size);
     if (t > job.nextSub) { job.sub = Math.floor(Math.random() * 3); job.nextSub = t + rand(6, 12); }
-    if (job.sub === 0) { J.torsoX = -0.3; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands
-    else if (job.sub === 1) { J.torsoX = 0.15; J.armN = reachPose(armN, tp(-0.24, 0.02, 0.36)); J.armP = reachPose(armP, tp(0.24, 0.02, 0.36)); }   // hands on his knees
+    if (job.sub === 0) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.32, -0.1, -0.3)); J.armP = reachPose(armP, tp(0.32, -0.1, -0.3)); }   // leaning back on his hands (the reach clamp keeps the arms short)
+    else if (job.sub === 1) { J.torsoX = -0.18; J.armN = reachPose(armN, tp(-0.16, 0.0, 0.27)); J.armP = reachPose(armP, tp(0.16, 0.0, 0.27)); }   // hands resting on his knees
     else { J.torsoX = 0.1; J.armN = reachPose(armN, tp(-0.12, 0.08, 0.36)); J.armP = reachPose(armP, headPoint(0.25, -0.8, 0.15)); }               // chin in his hand
     J.wN = J.wP = k; J.neck = [0, 0.35 * Math.sin(t * 0.3), 0.08 * Math.sin(t * 0.5)]; J.neckW = k;
     J.face = fs => { fs.mouth.smile += 0.2; };
@@ -2096,7 +2238,7 @@ function poseJob3(name, t, dt, k) {
     if (job.phase === "do") sweat(t, size, effort);
     p.st = { active: k > 0.5, takeL: e === 3 && on > 0.05, takeR: e === 3 && on > 0.05 };
   } else if (name === "punch") {
-    J.yaw = spotYaw;
+    J.yaw = spotYaw - 0.35;                                   // a turn toward the camera, so the bag sits beside his head rather than behind it
     const hitW = propPt(p, A.bagHit.x, A.bagHit.y, A.bagHit.z), bonked = job.bonkT && t - job.bonkT < 1.8;
     job.punches ??= 0;
     if (bonked) {
@@ -2299,7 +2441,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     J.capPop = 2.2 * catching;                                    // holds his cap up to catch the coins
     capG.getWorldPosition(V1);
     J.armN = reachPose(armN, toTorso(V1.clone().add(V2.set(-0.3, 0, 0).multiplyScalar(size * J.scale)))); J.armP = reachPose(armP, toTorso(V1.clone().add(V2.set(0.3, 0, 0).multiplyScalar(size * J.scale)))); J.wN = J.wP = k * catching;
-    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * 2.2 * size, z: job.at.z, speed: 2.2 * size };
+    const sway = Math.max(0, Math.min(2.2 * size, xMaxAt(job.at.z, size) - 0.5 * size));   // keep the sway inside the frame (matters on a square source)
+    if (live) job.steer = { x: job.at.x + Math.sin(k2 * 1.4) * sway, z: job.at.z, speed: 2.2 * size };
     J.yaw = 0; J.look = { x: 0, y: 0.9 };
     J.face = fs => { fs.wide += 0.4; fs.mouth.open = Math.max(fs.mouth.open, 0.6); fs.mouth.smile += 1; fs.pupil += 0.3; fs.browY = fs.browY.map(v => v + 1); };
     if (once("rain1", k2 > 0.4)) { FX.coins?.rain(0, W, clamp(Math.round(n / 4), 60, 400)); sfx("airhorn"); }
@@ -2334,7 +2477,8 @@ function poseEvent(name, t, dt, k, k2, size) {
     if (live && t > nextFloat && k2 > 1) { floater(screenPt(rand(-0.9, 0.9), -0.8, stage.zNear), fTex, V2.set(0, 0.6, 0).multiplyScalar(size)); nextFloat = t + 0.25; }
   }
   if (!J.root) { J.root = new THREE.Vector3(nav.x, S.hop * size, nav.z); J.rootQ = yawQ(J.yaw ?? 0); J.rootW = 1; }
-  if (stage.wide) J.root.y -= (J.scale - 1) * 1.75 * size;           // giant: he stands in front of the bottom edge so his whole face fits on screen
+  // giant: he stands in front of the bottom edge so his whole face fits on screen (the square frame is lower, so he drops further)
+  J.root.y -= (J.scale - 1) * (stage.wide ? 1.75 : 2.4) * size;
 }
 
 function blendFace(fs, fn, w) {                                // apply an activity's face changes to a copy, then mix by weight
@@ -2430,7 +2574,8 @@ function update(dt) {
     speed = 0.5 * size;
     if (want) { nav.tx = clamp(nav.x, homeX - 0.5, homeX + 0.5); nav.tz = clamp(nav.z, homeZ - 0.4, homeZ + 0.4); }
     else if (t > nav.nextDecision) {
-      nav.tx = clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm); nav.tz = clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear);
+      const wr = 0.9 * size + (1 - Math.min(1, size)) * 0.6 * xm;  // a smaller Gary wanders a wider stretch of the screen, not just his own few steps
+      [nav.tx, nav.tz] = freeTarget(() => [clamp(homeX + rand(-1, 1) * wr, -xm, xm), clamp(homeZ + rand(-0.6, 0.6) * Math.max(size, 0.8), stage.zFar, stage.zNear)]);
       nav.nextDecision = t + rand(4, 10);
     }
   } else if (mode === "roam") {
@@ -2447,12 +2592,10 @@ function update(dt) {
         nav.x = side * (xMaxAt(nav.z, size) + 2.2 * size);
         nav.tx = side * rand(0.2, 0.8) * Math.max(0, xMaxAt(nav.z, size) - margin); nav.tz = nav.z;
         nav.nextDecision = t + rand(4, 9);
-      } else if (false) {                                            // (wandering off screen is off: g doesn't want him leaving the screen)
-        nav.tx = Math.sign(nav.x || 1) * (xMaxAt(nav.z, size) + 2.2 * size); nav.tz = nav.z;
-        nav.nextDecision = t + rand(8, 16);
       } else {
-        nav.tz = rand(stage.zFar, stage.zNear);
-        nav.tx = rand(-1, 1) * Math.max(0, xMaxAt(nav.tz, size) - margin);
+        // the smaller he is, the more often he heads right out to an edge of the screen (at size 1 about 1 trip in 6, at 0.5 about 1 in 2)
+        const edgy = clamp(0.15 + (1 - size) * 0.7, 0.1, 0.65);
+        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear), xz = Math.max(0, xMaxAt(z, size) - margin * (size < 1 ? 0.6 : 1)); return [(Math.random() < edgy ? (Math.random() < 0.5 ? -1 : 1) * rand(0.82, 1) : rand(-1, 1)) * xz, z]; });
         nav.nextDecision = t + rand(3, 9);
       }
     }
@@ -2467,6 +2610,7 @@ function update(dt) {
   if (!stage.wide) { nav.tx = clamp(nav.tx, -xm, xm); nav.tz = clamp(nav.tz, stage.zFar, stage.zNear); }
 
   if (scene_().front && !job) nav.tz = Math.max(nav.tz, lerp(stage.zFar, stage.zNear, 0.65));   // chatting: hangs near the camera
+  if (((act.name && BITS[act.name]) || dream.on) && t < (nav.holdUntil || 0)) { nav.tx = nav.x; nav.tz = nav.z; }   // a bit plays where he stands, even in stay mode away from home
   const jn = jobUpdate(t, dt, want, mode, size);               // an activity steers him to its spot
   if (jn) { nav.tx = jn.x; nav.tz = jn.z; speed = jn.speed; }
   if (scene_().slow && !(job && job.def.event)) speed *= scene_().slow;
@@ -2474,6 +2618,13 @@ function update(dt) {
   // ---- walk toward the target
   const dx = nav.tx - nav.x, dz = nav.tz - nav.z, dist = Math.hypot(dx, dz);
   const moving = dist > 0.04 ? 1 : 0;
+  // running: when the target jumps somewhere far he sometimes jogs there, and he always runs when in a hurry (dashing on screen to talk)
+  if (Math.hypot(nav.tx - (nav.prevTx ?? nav.tx), nav.tz - (nav.prevTz ?? nav.tz)) > 0.5 * size)
+    nav.runTrip = !(jn && jn.backward) && !(job && (job.phase === "do" || job.name === "stare")) && (speed >= 1.3 * size || (dist > 2.6 * size && Math.random() < 0.4));
+  nav.prevTx = nav.tx; nav.prevTz = nav.tz;
+  if (nav.runTrip && (dist < 0.6 * size || (job && job.phase === "do"))) nav.runTrip = false;
+  nav.run = smooth(nav.run || 0, nav.runTrip && moving ? 1 : 0, 4, dt);
+  speed *= 1 + 1.1 * nav.run;
   nav.moving = smooth(nav.moving, moving, 7, dt);
   nav.speed = smooth(nav.speed, speed, 4, dt);
   if (moving) {
@@ -2491,12 +2642,19 @@ function update(dt) {
   hopV -= dt * 9; S.hop = Math.max(0, S.hop + hopV * dt); if (S.hop === 0) hopV = 0;
 
   // ---- one-off actions while idle: drag on the cigarette, scratch, fix the cap, stretch
-  if (!busy && !moving && !act.name && !job && t > nextIdleAct) {
+  runQueuedDo(want, busy);
+  const dreamFree = busy < 0.05 && !moving && !act.name && !(job && (job.phase !== "do" || job.def.event));
+  if (!dream.on && dreamFree && t > dream.next) { startDream(); dream.next = t + rand(30, 75) * actGap(); }
+  if (dream.on && (t > dream.until || busy > 0.05 || moving)) { dream.on = false; dream.next = Math.max(dream.next, t + 20); }
+  dream.k = smooth(dream.k, dream.on ? 1 : 0, dream.on ? 5 : 7, dt);
+  if (busy < 0.05 && !moving && !act.name && !job && !queuedDo && t > nextIdleAct) {
     const pool = ["drag", "drag", "drag", "scratch", "cap", "stretch", ...Object.keys(BITS).filter(n => settings.acts.on[n] && n !== "embarrassed")].filter(n => sceneAllows(n) || ["drag", "scratch", "cap"].includes(n));
     startGesture(pool[Math.floor(Math.random() * pool.length)]);
     nextIdleAct = t + rand(14, 30) * actGap();
   }
-  if (act.name && (t - act.t0 > act.dur || (busy && act.name !== "wave") || moving)) { act = { name: null, t0: 0, dur: 0 }; nextIdleAct = Math.max(nextIdleAct, t + 6); }
+  // busy is a smoothed value that only decays toward 0 (it stays truthy for ~2 minutes after a line), so compare it to a threshold
+  const held = act.name && BITS[act.name] && t < (nav.holdUntil || 0);
+  if (act.name && (t - act.t0 > act.dur || (busy > 0.05 && act.name !== "wave") || (moving && !held))) { act = { name: null, t0: 0, dur: 0 }; nextIdleAct = Math.max(nextIdleAct, t + 6); }
   const ap = act.name ? (t - act.t0) / act.dur : 0;              // 0..1 progress of the action
   const dragging = act.name === "drag";
   const inhale = dragging ? clamp((ap - 0.25) / 0.3, 0, 1) * clamp((0.7 - ap) / 0.1, 0, 1) : 0;
@@ -2544,13 +2702,13 @@ function update(dt) {
   const winkEye = 1;                                            // winks with his right eye (viewer's right)
   const fs = {
     squash: [0, 1].map(i => (1 - S.blink) * (1 - (i === winkEye ? mood.wink * 0.95 : 0)) * (1 - 0.12 * squint)),
-    lid: [0, 1].map(i => clamp(0.12 * (1 - busy) * (1 - mood.surprise) + (i === 1 ? 0.45 : 0.05) * S.think + 0.5 * inhale + 0.3 * exhale, 0, 0.8)),
+    lid: [0, 1].map(i => clamp(0.2 * (1 - busy) * (1 - mood.surprise) + (i === 1 ? 0.45 : 0.05) * S.think + 0.5 * inhale + 0.3 * exhale, 0, 0.8)),   // resting lids a little heavy: unimpressed, not wide-eyed
     lower: [0, 1].map(i => clamp(0.35 * happy + 0.25 * mood.smirk * (i === 1 ? 1 : 0.2) + (i === 1 ? 0.3 : 0) * S.think + 0.2 * squint - 0.3 * mood.surprise, 0, 0.85)),
     wide: 0.25 * mood.surprise - 0.08 * S.think,
     gx: S.gaze.x, gy: S.gaze.y,
     pupil: 1 + 0.15 * mood.surprise - 0.1 * S.think + 0.05 * Math.sin(t * 1.1),
     browY: [0, 1].map(i => (i === 0 ? 0.9 : -0.35) * S.think + 0.9 * mood.surprise + 0.6 * level * S.talk + (i === 1 ? 0.5 : 0) * mood.smirk - 0.2 * inhale),
-    browTilt: [0, 1].map(i => 0.25 + (i === 0 ? -0.6 : 0.35) * S.think - 0.3 * mood.surprise + 0.15 * S.talk * level),
+    browTilt: [0, 1].map(i => 0.16 + (i === 0 ? -0.6 : 0.35) * S.think - 0.3 * mood.surprise + 0.15 * S.talk * level),
     blush: 0.3 + 0.4 * happy + 0.3 * S.talk,
     mouth: {
       open: clamp(talkOpen + 0.5 * mood.surprise * (1 - S.talk) + 0.25 * exhale, 0, 1),
@@ -2610,7 +2768,6 @@ function update(dt) {
   }
 
   updateFur(t);
-  if (vrmRig) { vrmRig.update(dt, S); return; }
 
   // ---- drive the built-in model
   byte.position.set(nav.x, S.hop * size, nav.z);
@@ -2621,13 +2778,13 @@ function update(dt) {
   if (J.root && J.rootW > 0.001) { byte.position.lerp(J.root, J.rootW); byte.quaternion.slerp(J.rootQ, J.rootW); }   // sitting / lying
   const vy = hopV * (S.hop > 0 ? 1 : 0);
   squash.scale.set(1 - vy * 0.05, 1 + vy * 0.08, 1 - vy * 0.05);
-  const step = Math.sin(S.walkPhase), mv = nav.moving;
+  const step = Math.sin(S.walkPhase), mv = nav.moving, run = nav.run || 0;   // run 0..1 turns the walk into a jog: longer stride, bent elbows pumping, leaning in
   if (t > nextShift && !moving) { shiftTarget = rand(-1, 1); nextShift = t + rand(6, 14); }
   const shift = (hips.userData.shift = smooth(hips.userData.shift || 0, moving ? 0 : shiftTarget, 1.5, dt));
-  hips.position.set(0.035 * shift, 0.46 + Math.abs(Math.cos(S.walkPhase)) * 0.045 * mv + Math.sin(t * 2.2) * 0.006, 0);
+  hips.position.set(0.035 * shift, 0.46 + Math.abs(Math.cos(S.walkPhase)) * (0.045 + 0.06 * run) * mv + Math.sin(t * 2.2) * 0.006, 0);
   hips.rotation.z = -0.05 * shift;
   torso.rotation.z = step * 0.06 * mv + Math.sin(t * 0.9) * 0.02 + 0.06 * shift;
-  torso.rotation.x = 0.1 * mv + 0.05 * S.talk * level + 0.12 * S.think + 0.1 * inhale + (act.name === "stretch" ? -0.15 * Math.sin(ap * Math.PI) : 0);
+  torso.rotation.x = (0.1 + 0.22 * run) * mv + 0.05 * S.talk * level + 0.12 * S.think + 0.1 * inhale + (act.name === "stretch" ? -0.15 * Math.sin(ap * Math.PI) : 0);
   torso.scale.set(1 + Math.sin(t * 2.2) * 0.012, 1 + Math.sin(t * 2.2 + 1) * 0.014, 1);   // breathing
   if (J.w > 0.001) {
     hips.position.y += J.hipsY * J.w; hips.rotation.z += J.hipsZ * J.w;
@@ -2640,8 +2797,8 @@ function update(dt) {
   for (const [lg, sgn] of [[legN, 1], [legP, -1]]) {
     const ph = S.walkPhase + (sgn > 0 ? 0 : Math.PI);
     const swing = Math.sin(ph);
-    lg.hp.rotation.x = swing * 0.55 * mv - 0.3 * (S.hop > 0 ? 1 : 0) + (shift * sgn > 0 ? 0.05 * Math.abs(shift) : 0);
-    lg.kn.rotation.x = Math.max(0, Math.cos(ph - 0.6)) * 1.0 * mv * (swing > -0.2 ? 1 : 0.2) + kneeBend + (shift * sgn > 0 ? 0.25 * Math.abs(shift) : 0);
+    lg.hp.rotation.x = swing * (0.55 + 0.4 * run) * mv - 0.3 * (S.hop > 0 ? 1 : 0) + (shift * sgn > 0 ? 0.05 * Math.abs(shift) : 0);
+    lg.kn.rotation.x = Math.max(0, Math.cos(ph - 0.6)) * (1.0 + 0.7 * run) * mv * (swing > -0.2 ? 1 : 0.2) + kneeBend + (shift * sgn > 0 ? 0.25 * Math.abs(shift) : 0);
     lg.ft.rotation.x = -lg.kn.rotation.x * 0.7 + Math.max(0, -swing) * 0.3 * mv;
   }
   [legN, legP].forEach((lg, i) => {
@@ -2654,8 +2811,8 @@ function update(dt) {
   if (t > nextGesture) { talkGesture = { n: Math.random() < 0.55 ? Math.random() : 0, p: Math.random() < 0.6 ? Math.random() : 0, k: Math.random() }; nextGesture = t + rand(0.7, 2); }
   const gN = talkGesture.n * S.talk * (0.35 + level), gP = talkGesture.p * S.talk * (0.35 + level);
   const pick = k => k < 0.4 ? "gestureOut" : k < 0.7 ? "gestureUp" : k < 0.85 ? "gesturePoint" : "shrug";
-  const walkN = eulerPose(-step * 0.65 * mv + 0.05, 0, -0.18, -0.3 - 0.4 * mv);
-  const walkP = eulerPose(step * 0.65 * mv + 0.05, 0, 0.18, -0.3 - 0.4 * mv);
+  const walkN = eulerPose(-step * (0.65 + 0.35 * run) * mv, 0, -0.12, -0.5 - 0.3 * mv - 0.9 * run * mv);
+  const walkP = eulerPose(step * (0.65 + 0.35 * run) * mv, 0, 0.12, -0.5 - 0.3 * mv - 0.9 * run * mv);
   let pN = blendPose(walkN, POSE[pick(talkGesture.k)](-1), clamp(gN, 0, 1));
   let pP = blendPose(walkP, POSE[pick(1 - talkGesture.k)](1), clamp(gP, 0, 1));
   if (S.think > 0.01) {
@@ -2663,8 +2820,9 @@ function update(dt) {
     else pN = blendPose(pN, reachPose(armN, headPoint(-0.15, -0.85, thinkStyle === "pencil" ? 0.3 + 0.06 * Math.max(0, Math.sin(t * 14)) : 0.08)), S.think);   // hand on chin, or tapping a pencil on it
   }
   if (act.name === "drag") pP = blendPose(pP, reachPose(armP, headPoint(0.3, -0.72, 0.2)), Math.sin(Math.min(1, ap / 0.75) * Math.PI) ** 0.5);  // hand to the cigarette
-  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, reachPose(armP, headPoint(1.2, 0.25 + Math.sin(t * 16) * 0.05, 0.12)), w); }
-  if (act.name === "cap") pP = blendPose(pP, reachPose(armP, headPoint(0.45, 0.35, 0.35)), Math.sin(ap * Math.PI) ** 0.5);
+  const gS = act.side || 1, gA = gS < 0 ? armN : armP;                                   // the hand that scratches or fixes the cap
+  if (act.name === "scratch") { const w = Math.sin(ap * Math.PI) ** 0.5, p = reachPose(gA, headPoint(0.88 * gS, 0.1 + Math.sin(t * 16) * 0.04, 0.14)); if (gS < 0) pN = blendPose(pN, p, w); else pP = blendPose(pP, p, w); }   // the temple, forward enough that the hand shows
+  if (act.name === "cap") { const w = Math.sin(ap * Math.PI) ** 0.5, p = reachPose(gA, headPoint(0.85 * gS, 0.1, 0.22)); if (gS < 0) pN = blendPose(pN, p, w); else pP = blendPose(pP, p, w); }   // the bill's side-front corner; the head rolls toward the hand (below) so it is in reach
   if (act.name === "wave") { const w = Math.sin(ap * Math.PI) ** 0.5; pP = blendPose(pP, eulerPose(-2.1, 0, 0.9 + Math.sin(t * 14) * 0.25, -1.0), w); }
   if (act.name === "stretch") { const w = Math.sin(ap * Math.PI) ** 0.5; pN = blendPose(pN, POSE.up(-1), w); pP = blendPose(pP, POSE.up(1), w); }
   if (S.hop > 0) { const hopQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.6, 0, 0)); pN.q.premultiply(hopQ); pP.q.premultiply(hopQ); }
@@ -2674,13 +2832,14 @@ function update(dt) {
   applyArm(armN, pN, dt, armRate); applyArm(armP, pP, dt, armRate);
 
   // head, with secondary bounce on the cap, hair and mustache
-  neck.rotation.set(S.nod + (act.name === "cap" ? -0.08 * Math.sin(ap * Math.PI) : 0) + 0.09 * inhale, S.headYaw - 0.1 * inhale, -S.tilt);
+  neck.rotation.set(S.nod + (act.name === "cap" ? -0.08 * Math.sin(ap * Math.PI) : 0) + 0.09 * inhale, S.headYaw - 0.1 * inhale, -S.tilt - (act.name === "cap" ? 0.22 * (act.side || 1) * Math.sin(ap * Math.PI) : 0));
+  neck.rotation.x -= 0.16 * dream.k; neck.rotation.y += 0.18 * dream.k;   // looking up at his daydream
   if (J.neckW > 0.001) { neck.rotation.x += J.neck[0] * J.neckW; neck.rotation.y += J.neck[1] * J.neckW; neck.rotation.z += J.neck[2] * J.neckW; }
   head.scale.set(1 + level * 0.012 * S.talk, 1 - level * 0.012 * S.talk, 1);
   const pitchV = (S.nod - prevHeadPitch) / Math.max(dt, 1e-3), yawV = (S.headYaw - prevHeadYaw) / Math.max(dt, 1e-3);
   prevHeadPitch = S.nod; prevHeadYaw = S.headYaw;
   const capLag = capSpring.update(dt, 0, -pitchV * dt * 0.9 - (vy > 0 ? vy * dt * 2 : 0));
-  capG.rotation.x = -0.05 + capLag * 0.25 + (act.name === "cap" ? 0.12 * Math.sin(ap * Math.PI) : 0);
+  capG.rotation.x = CAP.tilt + capLag * 0.25 + (act.name === "cap" ? 0.12 * Math.sin(ap * Math.PI) : 0);
   capG.position.y = 0.2 + (act.name === "cap" ? 0.03 * Math.sin(ap * Math.PI) : 0) + 0.32 * J.capPop;
   capG.rotation.x -= 0.5 * J.capPop;
   const hairLag = hairSpring.update(dt, 0, -yawV * dt * 0.6);
@@ -2696,18 +2855,21 @@ function update(dt) {
 
   // lights follow him so the shadow stays sharp wherever he walks
   const lx = byte.position.x, lz = byte.position.z;
-  key.target.position.set(lx, 0, lz); key.position.set(lx + 2.5, 5.5, lz + 4);
+  key.target.position.set(lx, 0, lz); key.position.set(lx + 2.5, 4.6, lz + 4.4);          // a little lower than before, so the bill does not put his eyes in shadow
   rim.target.position.set(lx, 1, lz); rim.position.set(lx - 3, 4, lz - 3);
   fill.target.position.set(lx, 1, lz); fill.position.set(lx - 3, 1.5, lz + 3);
 
   // thought bubble
-  thought.visible = S.think > 0.02;
-  const ts = S.think * size;
+  const tk = Math.max(S.think, dream.k);                       // thinking up an answer (dots) or daydreaming (a picture)
+  thought.visible = tk > 0.02;
+  const ts = tk * size;
   thought.scale.setScalar(ts);
   const tb = thoughtSpring.update(dt, 0, (vy > 0 ? vy * dt * 2 : 0));
   thought.position.set(nav.x + 0.78 * size, S.hop * size + 2.5 * size * evScale + Math.sin(t * 2) * 0.04 + tb * 0.2, nav.z + 0.2 * size);
+  if (dream.k > S.think && J.w > 0.05) { head.getWorldPosition(V1); thought.position.set(V1.x + 0.78 * size, V1.y + 0.95 * size + Math.sin(t * 2) * 0.04, V1.z + 0.2 * size); }   // sitting or lying: float it over where his head is
   thought.lookAt(camera.position);
-  cloud.opacity = S.think;
+  cloud.opacity = tk;
+  dotsMat.opacity = clamp((S.think - dream.k) * 3 + 0.5, 0, 1); dreamSp.material.opacity = clamp((dream.k - S.think) * 3, 0, 1);
   tDots.forEach((d, i) => { d.position.y = 0.03 + Math.max(0, Math.sin(t * 6 - i * 0.8)) * 0.06; });
 
   // camera shake for the big moments
@@ -2724,11 +2886,13 @@ function update(dt) {
     bubble.style.left = px + "px"; bubble.style.top = py + "px";
   }
 }
+let lastFrameErr = null;
 function tick() {
+  requestAnimationFrame(tick);                        // queue the next frame first, so one bad prop frame can't freeze the overlay
   const dtf = Math.min(clock.getDelta(), 0.05);
-  if (!debug.frozen) update(dtf);                     // byteDebug.frozen = true holds the pose for preview screenshots
+  try { if (!debug.frozen) update(dtf); }            // byteDebug.frozen = true holds the pose for preview screenshots
+  catch (e) { if (String(e && e.message) !== lastFrameErr) { lastFrameErr = String(e && e.message); console.error(e); } }   // log each distinct error once
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
 }
 addEventListener("resize", resize);
 resize();

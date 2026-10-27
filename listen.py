@@ -28,7 +28,19 @@ class Listener:
         self.chunks = queue.Queue()
 
     def start(self, loop):
-        threading.Thread(target=self._run, args=(loop,), daemon=True).start()
+        threading.Thread(target=self._guarded, args=(loop,), daemon=True).start()
+
+    def _guarded(self, loop):
+        # a bad device or model must end the mic only, not print a bare traceback and leave no trace in the log
+        try:
+            self._run(loop)
+        except Exception:
+            log.exception("Mic listening stopped; Gary keeps running without the mic")
+
+    def _log_failure(self, fut):
+        # on_text runs on the bot's loop; without this its errors would vanish silently
+        if not fut.cancelled() and fut.exception():
+            log.warning("Couldn't handle what the mic heard: %s", fut.exception())
 
     def _run(self, loop):
         try:
@@ -37,7 +49,7 @@ class Listener:
         except ImportError:
             log.error("Mic listening needs:  pip install faster-whisper sounddevice")
             return
-        log.info("Loading speech model %s (first run downloads it)...", self.cfg["whisper_model"])
+        log.info("loading whisper model (first run can take a minute): %s", self.cfg["whisper_model"])
         model = WhisperModel(self.cfg["whisper_model"], device="cpu", compute_type="int8")
         threshold = float(self.cfg.get("energy_threshold", 0.015))
         dev = self.cfg.get("device") or None
@@ -77,4 +89,4 @@ class Listener:
                                                     initial_prompt=f"{self.name}, talking to {self.name} on stream.")
                     text = " ".join(s.text.strip() for s in segments).strip()
                     if text:
-                        asyncio.run_coroutine_threadsafe(self.on_text(text), loop)
+                        asyncio.run_coroutine_threadsafe(self.on_text(text), loop).add_done_callback(self._log_failure)

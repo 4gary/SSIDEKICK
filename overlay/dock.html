@@ -8,25 +8,28 @@
 <style>
   :root { --bg: #0f0d1a; --panel: #1a1730; --line: #2e2950; --text: #ecebf5; --muted: #9b97b8; --accent: #7c5cff; --ok: #3ddc97; --bad: #ff6b81; --warn: #ffc857; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 12.5px/1.35 "Segoe UI", system-ui, sans-serif; user-select: none; }
-  main { padding: 6px; display: grid; gap: 6px; }
-  details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-  summary { padding: 6px 8px; cursor: pointer; font-weight: 600; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 12px/1.3 "Segoe UI", system-ui, sans-serif; user-select: none; overflow-x: hidden; }
+  main { padding: 6px; display: grid; gap: 5px; }
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+  summary { padding: 5px 8px; cursor: pointer; font-weight: 600; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
   summary::before { content: "▸"; font-size: 10px; } details[open] > summary::before { content: "▾"; }
   summary .note { margin-left: auto; font-weight: 400; font-size: 11px; }
-  .body { padding: 0 6px 6px; display: grid; gap: 5px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 4px; }
+  .body { padding: 0 6px 6px; display: grid; gap: 4px; min-width: 0; }
+  /* labels wrap rather than truncate; two columns at the narrow width */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 4px; }
   .grid.two { grid-template-columns: 1fr 1fr; } .grid.four { grid-template-columns: repeat(4, 1fr); } .grid.three { grid-template-columns: 1fr 1fr 1fr; }
-  button { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 4px; font: inherit; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 3px; font: inherit; cursor: pointer; min-width: 0; line-height: 1.15; }
   button:hover { border-color: var(--accent); }
   button:active { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: default; }
   button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.main { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.danger { border-color: #5a2a3a; color: var(--bad); }
+  button.armed { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
   button.flash { border-color: var(--ok); }
-  input, select { width: 100%; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
+  input, select { width: 100%; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; font: inherit; }
   input[type=range] { accent-color: var(--accent); padding: 0; border: 0; background: none; }
-  .row { display: flex; gap: 4px; align-items: center; } .row > input { flex: 1; } .row > button { flex: 0 0 auto; padding: 6px 8px; }
+  .row { display: flex; gap: 4px; align-items: center; min-width: 0; } .row > input { flex: 1; } .row > button { flex: 0 0 auto; padding: 5px 8px; }
   .lbl { font-size: 11px; color: var(--muted); }
   #top { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
   .dot { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); padding: 2px 6px; border-radius: 99px; border: 1px solid var(--line); }
@@ -35,32 +38,45 @@
   #state { font-size: 11.5px; padding: 4px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); }
   #state.quiet { border-color: var(--warn); color: var(--warn); }
   #state.off { border-color: var(--bad); color: var(--bad); }
+  #hint { font-size: 11.5px; color: var(--bad); }
   .pos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
-  .pos button { padding: 5px 0; font-size: 11px; }
+  .pos button { padding: 4px 0; font-size: 11px; }
+  .talk3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
 </style>
 </head>
 <body>
 <main>
+  <!-- Talk and the main controls come first, so they show without scrolling in a 300 px dock -->
+  <details open data-k="talk"><summary>Talk</summary><div class="body">
+    <input id="text" placeholder="Type, then pick who says it" autocomplete="off">
+    <div class="talk3">
+      <button class="main" id="ask" title="Talk to Gary as dum (Enter)">Ask him</button>
+      <button id="sayExact" title="Gary says exactly this">Say exactly</button>
+      <button id="react" title="Gary reacts to this as a stream event">React</button>
+    </div>
+  </div></details>
+
   <div id="top">
     <span class="dot" id="dWs">Server</span><span class="dot" id="dOv">Overlay</span><span class="dot" id="dLm">LM</span><span class="dot" id="dSb">SB</span>
   </div>
   <div id="state">Connecting...</div>
+  <div id="hint" style="display:none"></div>
   <div class="grid three">
-    <button id="pause" class="main" title="Pause or resume everything Gary does">Pause</button>
+    <button id="pause" class="main" title="Pause or resume everything Gary does" data-confirm="Confirm pause">Pause</button>
     <button id="skip" title="Stop the line he's saying now">Skip line</button>
     <button id="hush" title="Cut him off and drop anything queued (he can pick it up with 'go ahead')">Hush</button>
   </div>
 
   <details open data-k="quiet"><summary>Quiet / break <span class="note" id="muteNote"></span></summary><div class="body">
     <div class="lbl">Stop talking (alerts still get through)</div>
-    <div class="grid four">
+    <div class="grid two">
       <button data-say="stop talking for 5 minutes">5 min</button>
       <button data-say="stop talking for 15 minutes">15 min</button>
       <button data-say="stop talking for 30 minutes">30 min</button>
       <button data-say="stop talking">Until back</button>
     </div>
     <div class="lbl">Go away (does his own thing on screen)</div>
-    <div class="grid four">
+    <div class="grid two">
       <button data-say="go away for 5 minutes">5 min</button>
       <button data-say="go away for 15 minutes">15 min</button>
       <button data-say="go away for 30 minutes">30 min</button>
@@ -89,8 +105,10 @@
     <button class="danger" data-do="stop">Stop what he's doing</button>
     <div class="lbl">Stream mode</div>
     <select id="scene"><option value="normal">Normal</option><option value="starting">Starting soon</option><option value="brb">BRB</option><option value="chatting">Just chatting</option><option value="gaming">Gaming</option><option value="marble">Marble race</option><option value="chill">Chill</option><option value="party">Party</option><option value="ending">Ending</option></select>
-    <div class="lbl">Event test (animation only)</div>
+    <div class="lbl">Event test (animation only, he stays quiet)</div>
     <div class="grid four" id="evs"><button data-ev="raid">Raid</button><button data-ev="sub">Sub</button><button data-ev="bits">Bits</button><button data-ev="follow">Follow</button><button data-ev="hype">Hype</button><button data-ev="rip">RIP</button><button data-ev="redeem">Redeem</button></div>
+    <div class="lbl">Full alert test (he talks too, like a real one)</div>
+    <div class="grid four" id="alerts"><button data-alert="raid">Raid</button><button data-alert="sub">Sub</button><button data-alert="bits">Bits</button><button data-alert="follow">Follow</button></div>
   </div></details>
 
   <details data-k="fx"><summary>Voice FX on your mic</summary><div class="body">
@@ -112,7 +130,7 @@
       <button data-api="poll" data-q="end=1">End poll</button>
       <button data-api="trivia" data-q="stop=1">Stop trivia</button>
       <button data-api="predict" data-q="lock=1">Lock prediction</button>
-      <button data-api="predict" data-q="cancel=1">Cancel prediction</button>
+      <button data-api="predict" data-q="cancel=1" data-confirm="Confirm cancel">Cancel prediction</button>
       <button data-api="race" data-q="state=start">Marble race start</button>
       <button data-api="leaderboard">Leaderboard</button>
     </div>
@@ -127,15 +145,6 @@
     </div>
   </div></details>
 
-  <details open data-k="talk"><summary>Talk</summary><div class="body">
-    <input id="text" placeholder="Type, then pick who says it" autocomplete="off">
-    <div class="grid three">
-      <button class="main" id="ask" title="Talk to Gary as dum (Enter)">Ask him</button>
-      <button id="sayExact" title="Gary says exactly this">Say exactly</button>
-      <button id="react" title="Gary reacts to this as a stream event">React</button>
-    </div>
-  </div></details>
-
   <div class="grid two">
     <button id="refresh">Refresh status</button>
     <button id="openCtl">Full control page</button>
@@ -143,12 +152,28 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let ws, avatar = {}, fxNames = null, sfxNames = null;
+let ws, avatar = {}, fxNames = null, sfxNames = null, paused = false;
+// every send reports whether the socket was open; text is cleared and buttons flash only when it was
 const send = o => { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } return false; };
+const NOT_SENT = "Not connected to Sidekick, so nothing was sent. Your text is still in the box.";
+let hintTimer = 0;
+function hint(text) {
+  const h = $("hint"); h.textContent = text; h.style.display = "block";
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => { h.style.display = "none"; }, 4000);
+}
 const flash = b => { if (!b) return; b.classList.add("flash"); setTimeout(() => b.classList.remove("flash"), 400); };
-const streamer = (t, b) => { send({ type: "streamer", text: "Gary, " + t }); flash(b); };
-const api = (kind, q, b) => { fetch(`/api/${kind}${q ? "?" + q : ""}`).then(() => flash(b)).catch(() => {}); };
-const setAvatar = change => { send({ type: "avatar", set: change }); applyAvatar(change); };
+const streamer = (t, b) => { if (send({ type: "streamer", text: "Gary, " + t })) flash(b); else hint(NOT_SENT); };
+const api = (kind, q, b) => fetch(`/api/${kind}${q ? "?" + q : ""}`)
+  .then(r => { if (r.ok) flash(b); else hint(`${kind} failed (HTTP ${r.status})`); })
+  .catch(() => hint("Sidekick isn't reachable"));
+const setAvatar = change => { if (send({ type: "avatar", set: change })) applyAvatar(change); else hint(NOT_SENT); };
+
+// two-step buttons: the first click arms the button for 3 s (label shown from data-confirm), the second does it
+function twoStep(b, fn) {
+  if (b._t) { clearTimeout(b._t); b._t = 0; b.classList.remove("armed"); b.textContent = b._label; fn(); return; }
+  b._label = b.textContent; b.textContent = b.dataset.confirm; b.classList.add("armed");
+  b._t = setTimeout(() => { b._t = 0; b.classList.remove("armed"); b.textContent = b._label; }, 3000);
+}
 
 // remember which sections are open
 document.querySelectorAll("details[data-k]").forEach(d => {
@@ -156,35 +181,48 @@ document.querySelectorAll("details[data-k]").forEach(d => {
   d.addEventListener("toggle", () => { try { localStorage.setItem("dock." + d.dataset.k, d.open ? "1" : "0"); } catch (e) {} });
 });
 
-$("pause").onclick = () => send({ type: "pause" });
-$("skip").onclick = e => { send({ type: "skip" }); flash(e.target); };
+// Pause sends the state we want (the server may honour it exactly), and the label shows what the server has
+$("pause").onclick = () => {
+  const b = $("pause");
+  if (paused) { if (!send({ type: "pause", paused: false })) hint(NOT_SENT); }
+  else twoStep(b, () => { if (!send({ type: "pause", paused: true })) hint(NOT_SENT); });
+};
+$("skip").onclick = e => { if (send({ type: "skip" })) flash(e.target); else hint(NOT_SENT); };
 $("hush").onclick = e => streamer("hold that thought", e.target);
-$("refresh").onclick = e => { send({ type: "refresh" }); flash(e.target); };
+$("refresh").onclick = e => { if (send({ type: "refresh" })) flash(e.target); else hint(NOT_SENT); };
 $("openCtl").onclick = () => window.open("/control", "_blank");
-$("idleNow").onclick = e => { send({ type: "idle_now" }); flash(e.target); };
+$("idleNow").onclick = e => { if (send({ type: "idle_now" })) flash(e.target); else hint(NOT_SENT); };
 
 document.addEventListener("click", e => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.say) streamer(b.dataset.say, b);
-  if (b.dataset.do) { send({ type: "avatar", set: { do: { name: b.dataset.do, at: Date.now() } } }); flash(b); }
+  if (b.dataset.do) { if (send({ type: "avatar", set: { do: { name: b.dataset.do, at: Date.now() } } })) flash(b); else hint(NOT_SENT); }
   // voice FX go through the spoken phrase, which works on every sidekick version
   if (b.dataset.fx) streamer(`give me the ${b.dataset.fx} voice`, b);
-  // other FX: /api/fx on newer sidekicks, the spoken phrase on older ones (404)
+  // other FX: /api/fx answers {ok:false} when no such Streamer.bot action exists; then say the phrase instead
   if (b.dataset.sfx) fetch(`/api/fx?effect=${encodeURIComponent(b.dataset.sfx)}`)
-    .then(r => r.ok ? flash(b) : streamer(`give me the ${b.dataset.sfx}`, b)).catch(() => {});
+    .then(r => r.json().catch(() => ({})).then(j => r.ok && j.ok !== false))
+    .then(ok => ok ? flash(b) : streamer(`give me the ${b.dataset.sfx}`, b))
+    .catch(() => streamer(`give me the ${b.dataset.sfx}`, b));
   if (b.dataset.api) {
+    // destructive buttons (Cancel prediction) need a second click
+    if (b.dataset.confirm) { twoStep(b, () => api(b.dataset.api, b.dataset.q || "", b)); return; }
     let q = b.dataset.q || "";
     if (b.dataset.in) { const v = $(b.dataset.in).value.trim(); q = v ? `${b.dataset.p}=${encodeURIComponent(v)}` : ""; $(b.dataset.in).value = ""; }
     api(b.dataset.api, q, b);
   }
 });
 
-// talk box
-const takeText = () => { const v = $("text").value.trim(); $("text").value = ""; return v; };
-$("ask").onclick = () => { const v = takeText(); if (v) send({ type: "streamer", text: v }); };
-$("sayExact").onclick = () => { const v = takeText(); if (v) send({ type: "say", text: v }); };
-$("react").onclick = () => { const v = takeText(); if (v) send({ type: "event", text: v }); };
+// talk box: the text is cleared only when the message went out over the socket
+function talk(type, btn) {
+  const v = $("text").value.trim();
+  if (!v) return;
+  if (send({ type, text: v })) { $("text").value = ""; flash(btn); } else hint(NOT_SENT);
+}
+$("ask").onclick = e => talk("streamer", e.target);
+$("sayExact").onclick = e => talk("say", e.target);
+$("react").onclick = e => talk("event", e.target);
 $("text").onkeydown = e => { if (e.key === "Enter") $("ask").click(); };
 
 // movement
@@ -192,16 +230,18 @@ document.querySelectorAll("button.mode").forEach(b => b.onclick = () => setAvata
 const POS = [["Back L", -0.72, -1], ["Back", 0, -1], ["Back R", 0.72, -1], ["Left", -0.72, 0], ["Middle", 0, 0], ["Right", 0.72, 0], ["Bottom L", -0.72, 1], ["Bottom", 0, 1], ["Bottom R", 0.72, 1]];
 $("pos").innerHTML = POS.map(([n, x, z]) => `<button data-x="${x}" data-z="${z}">${n}</button>`).join("");
 $("pos").querySelectorAll("button").forEach(b => b.onclick = () => {
-  const home = { x: Number(b.dataset.x), z: Number(b.dataset.z) };
-  const change = { home };
-  if (avatar.mode !== "stay" && avatar.mode !== "wander") change.mode = "stay";
-  setAvatar(change);
+  // the server merges home, so x and z go as separate changes and never overwrite each other
+  const x = Number(b.dataset.x), z = Number(b.dataset.z);
+  if (!send({ type: "avatar", set: { home: { x } } })) return hint(NOT_SENT);
+  send({ type: "avatar", set: { home: { z } } });
+  applyAvatar({ home: { x, z } });
+  if (avatar.mode !== "stay" && avatar.mode !== "wander") setAvatar({ mode: "stay" });
 });
 $("size").oninput = () => { $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; };
 $("size").onchange = () => setAvatar({ size: Number($("size").value) });
 
 // activities (same list as the full control page)
-const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose"], ["armpit", "Sniff pit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Butterfly"],
+const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose"], ["armpit", "Sniff pit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Butterfly"], ["daydream", "Daydream"],
   ["yawn", "Yawn"], ["knuckles", "Knuckles"], ["watch", "Watch"], ["shoe", "Tie shoe"], ["whistle", "Whistle"], ["mutter", "Mutter"], ["embarrassed", "Blush"], ["mictest", "Mic check"],
   ["stare", "Stare"], ["phone", "Phone"], ["lieback", "Lie back"], ["dj", "DJ set"], ["couch", "Couch"], ["nap", "Nap"], ["arcade", "Arcade"], ["desk", "Desk"], ["desknap", "Desk nap"],
   ["floorsit", "Floor sit"], ["snack", "Snack"], ["read", "Read"], ["ball", "Juggle"], ["fishing", "Fishing"], ["exercise", "Work out"], ["punch", "Punch bag"], ["yoga", "Yoga"], ["beer", "Beer"], ["plant", "Plant"], ["paint", "Paint"],
@@ -209,30 +249,40 @@ const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick"
 $("acts").innerHTML = ACTS.map(([k, n]) => `<button data-do="${k}">${n}</button>`).join("");
 
 const EV = { raid: { n: 42 }, sub: {}, bits: { n: 500 }, follow: {}, hype: {}, rip: {}, redeem: { title: "Hydrate" } };
-$("evs").querySelectorAll("button").forEach(b => b.onclick = () => { send({ type: "avatar", set: { do: { name: b.dataset.ev, who: "TestViewer", ...EV[b.dataset.ev], at: Date.now() } } }); flash(b); });
-$("scene").onchange = () => send({ type: "avatar", set: { acts: { ...(avatar.acts || {}), scene: $("scene").value, sceneAt: Date.now() } } });
+$("evs").querySelectorAll("button").forEach(b => b.onclick = () => { if (send({ type: "avatar", set: { do: { name: b.dataset.ev, who: "TestViewer", ...EV[b.dataset.ev], at: Date.now() } } })) flash(b); else hint(NOT_SENT); });
+// the full test goes through the same code a real Streamer.bot event does: Gary speaks about it and the overlay reacts
+const ALERT = { raid: { viewers: 42 }, sub: { months: 1 }, bits: { kind: "cheer", bits: 500 }, follow: {} };
+$("alerts").querySelectorAll("button").forEach(b => b.onclick = () => { const a = ALERT[b.dataset.alert]; if (send({ type: "alert", kind: b.dataset.alert, user: "TestViewer", ...a })) flash(b); else hint(NOT_SENT); });
+// the scene change keeps the server's other acts settings and stamps sceneAt for the stream-mode opener
+$("scene").onchange = () => { if (!send({ type: "avatar", set: { acts: { ...(avatar.acts || {}), scene: $("scene").value, sceneAt: Date.now() } } })) hint(NOT_SENT); };
+
+// Values shown here come from the server's avatar object, so changes made on the full control page show up too.
+// Home is matched to the nearest spot, so a 0.7 set on the control page still highlights Left or Right.
 function applyAvatar(a) {
   Object.assign(avatar, a);
   if (a.acts && a.acts.scene) $("scene").value = a.acts.scene;
   document.querySelectorAll("button.mode").forEach(b => b.classList.toggle("on", b.dataset.mode === avatar.mode));
   const h = avatar.home || {};
   $("pos").querySelectorAll("button").forEach(b => b.classList.toggle("on",
-    Math.abs(Number(b.dataset.x) - (h.x ?? 0.72)) < 0.2 && Number(b.dataset.z) === Math.round(h.z ?? 0)));
+    typeof h.x === "number" && Math.abs(Number(b.dataset.x) - h.x) < 0.1 && Number(b.dataset.z) === Math.round(h.z ?? 0)));
   if (a.size !== undefined) { $("size").value = a.size; $("sizeVal").textContent = Number(a.size).toFixed(1) + "×"; }
 }
 
 function dot(id, cls) { $(id).className = "dot " + cls; }
 function showStatus(m) {
   const f = m.features || {};
-  $("pause").textContent = m.paused ? "Resume" : "Pause";
-  $("pause").classList.toggle("danger", !!m.paused);
+  paused = !!m.paused;
+  const pb = $("pause");
+  pb._label = paused ? "Resume" : "Pause";
+  if (!pb._t) pb.textContent = pb._label;
+  pb.classList.toggle("danger", paused);
   dot("dOv", m.overlays > 0 ? "ok" : "");
   dot("dLm", (m.lm || "").startsWith("LM Studio OK") ? "ok" : "");
   dot("dSb", m.streamerbot ? "ok" : m.streamerbot === null ? "warn" : "");
   const st = $("state");
-  if (m.paused) { st.className = "off"; st.textContent = "Paused: Gary won't say anything"; }
+  if (paused) { st.className = "off"; st.textContent = "Paused: Gary won't say anything"; }
   else if (f.muted) { st.className = "quiet"; st.textContent = "Quiet: " + f.muted; }
-  else { st.className = ""; st.textContent = m.overlays > 0 ? "Live and talking" : "Running, but no overlay is open"; }
+  else { st.className = ""; st.textContent = m.overlays > 0 ? "Live and talking" : "Running, no overlay open"; }
   $("muteNote").textContent = f.muted || "";
   const games = [f.poll && "poll", f.trivia && "trivia", f.predict && "prediction", f.race && "race"].filter(Boolean);
   $("gameNote").textContent = games.length ? games.join(", ") + " on" : "";
@@ -252,13 +302,13 @@ function showStatus(m) {
   if (m.avatar) applyAvatar(m.avatar);
 }
 
+let build = 0;   // the app's stamp of the page files: a different one after a restart means this page is old, so reload
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => { dot("dWs", "ok"); send({ type: "hello", role: "control" }); };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if (m.type === "status") showStatus(m);
-    if (m.type === "avatar" && m.set) applyAvatar(m.set);
+    if (m.type === "status") { if (m.build) { if (build && m.build !== build) { location.reload(); return; } build = m.build; } showStatus(m); }
   };
   ws.onclose = () => { dot("dWs", ""); $("state").className = "off"; $("state").textContent = "Sidekick isn't running"; setTimeout(connect, 2000); };
 }
