@@ -1299,7 +1299,7 @@ class Features:
     # ------------------------------------------------------------ raids, subs, gifts, cheers, follows
 
     async def on_sb_event(self, source, etype, data):
-        log.info("[sb] %s %s from %s", source, etype, event_user(data) or "?")
+        # connections.py already logs every event as "[sb] Source.Type from who"
         if source == "Obs" and etype == "SceneChanged":
             name = (data.get("scene") or {}).get("sceneName") if isinstance(data.get("scene"), dict) else None
             name = name or data.get("sceneName") or data.get("scene")

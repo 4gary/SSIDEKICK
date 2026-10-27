@@ -64,6 +64,11 @@ def _who(data):
     for k in ("displayName", "userName", "user"):
         if isinstance(data.get(k), str) and data[k]:
             return data[k]
+    scene = data.get("scene")                      # OBS scene events carry a scene, not a person
+    if isinstance(scene, dict) and scene.get("sceneName"):
+        return f"scene {scene['sceneName']}"
+    if isinstance(data.get("sceneName"), str):
+        return f"scene {data['sceneName']}"
     return "?"
 
 
