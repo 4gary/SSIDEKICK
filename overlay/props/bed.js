@@ -1,45 +1,15 @@
 // Cartoon single bed, lying along x, headboard at +x. Gary lies on his back, head on the pillow.
 // A patchwork quilt covers him from the feet to the chest; when inactive it sits folded at the foot.
+import { disposeTree, rboxSmooth, star } from './common.js';
+
 export function build(THREE, ctx) {
   const root = new THREE.Group();
 
   // ---------- helpers ----------
-  // Rounded box: a subdivided BoxGeometry whose vertices are pushed onto a rounded shell.
-  // Vertices are remapped toward the edges so the rounding gets enough samples. Normals are
-  // analytic (direction from the inner box), so the shading is smooth across faces.
-  function rbox(w, h, d, r, seg = 12) {
-    const g = new THREE.BoxGeometry(2, 2, 2, seg, seg, seg);
-    const P = g.attributes.position, N = g.attributes.normal;
-    const H = [w / 2, h / 2, d / 2];
-    const I = H.map(v => Math.max(0, v - r));
-    const f = t => -Math.cos(Math.PI * (t + 1) / 2);
-    for (let i = 0; i < P.count; i++) {
-      const pp = [0, 1, 2].map(k => H[k] * f(P.getComponent(i, k)));
-      const qq = [0, 1, 2].map(k => Math.max(-I[k], Math.min(I[k], pp[k])));
-      const dv = [0, 1, 2].map(k => pp[k] - qq[k]);
-      const L = Math.hypot(dv[0], dv[1], dv[2]) || 1;
-      const nx = dv[0] / L, ny = dv[1] / L, nz = dv[2] / L;
-      P.setXYZ(i, qq[0] + nx * r, qq[1] + ny * r, qq[2] + nz * r);
-      N.setXYZ(i, nx, ny, nz);
-    }
-    P.needsUpdate = true; N.needsUpdate = true;
-    return g;
-  }
-
-  function star(g, cx, cy, R, color) {
-    g.beginPath();
-    for (let k = 0; k < 10; k++) {
-      const rr = k % 2 ? R * 0.45 : R, a = -Math.PI / 2 + k * Math.PI / 5;
-      if (k) g.lineTo(cx + rr * Math.cos(a), cy + rr * Math.sin(a));
-      else g.moveTo(cx + rr * Math.cos(a), cy + rr * Math.sin(a));
-    }
-    g.closePath(); g.fillStyle = color; g.fill();
-  }
-
   // Blanket: superellipse cross-section swept along x, rounded (domed) at both ends.
   // Built in absolute prop coords, then shifted so the blanket group can pivot at y = PIVOT.
   function quiltGeometry() {
-    const x0 = -1.45, x1 = -0.1, a = 0.62, b = 0.34, yc = 0.64, PIVOT = 0.38;
+    const x0 = -1.45, x1 = 0.2, a = 0.62, b = 0.34, yc = 0.64, PIVOT = 0.38;
     const NX = 40, NZ = 56, R = 0.25, EXP = 2.4;
     const sp = (v, e) => Math.sign(v) * Math.pow(Math.abs(v), e);
     const dirZ = [], dirY = [];
@@ -91,6 +61,8 @@ export function build(THREE, ctx) {
   }
 
   // ---------- textures ----------
+  // filled five-pointed star (sticker on the quilt)
+  const fillStar = (g, cx, cy, R, color) => { star(g, cx, cy, R, R * 0.45); g.fillStyle = color; g.fill(); };
   const rng = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(7);
   const quiltPal = ["#e8857a", "#f2c46d", "#7cc4a4", "#7aa6d9", "#c79bd6", "#f6a6a0", "#9ed8c4", "#fbf3e4"];
   const quiltTex = ctx.canvasTex(512, 512, (g, w, h) => {
@@ -103,7 +75,7 @@ export function build(THREE, ctx) {
       g.strokeStyle = "rgba(255,250,240,0.95)"; g.lineWidth = 3; g.setLineDash([7, 6]);
       g.strokeRect(x + 11, y + 11, cw - 22, ch - 22);
       g.setLineDash([]);
-      if (rng() < 0.45) star(g, x + cw / 2, y + ch / 2, Math.min(cw, ch) * 0.24, "#fff3b0");
+      if (rng() < 0.45) fillStar(g, x + cw / 2, y + ch / 2, Math.min(cw, ch) * 0.24, "#fff3b0");
     }
   });
   const rugTex = ctx.canvasTex(512, 300, (g, w, h) => {
@@ -127,19 +99,19 @@ export function build(THREE, ctx) {
   const faceMat = new THREE.MeshStandardMaterial({ color: 0xfff8ea, roughness: 0.6 });
 
   // ---------- bed frame ----------
-  ctx.mesh(rbox(2.9, 0.16, 1.2, 0.06), woodMat, root, [0, 0.19, 0]);
+  ctx.mesh(rboxSmooth(THREE, 2.9, 0.16, 1.2, 0.06), woodMat, root, [0, 0.19, 0]);
   // chunky rounded legs: short at the foot end, taller posts at the headboard end
   for (const sz of [-1, 1]) {
     ctx.mesh(new THREE.CapsuleGeometry(0.075, 0.29, 6, 14), woodMat, root, [-1.38, 0.22, 0.52 * sz]);
     ctx.mesh(new THREE.CapsuleGeometry(0.085, 0.89, 6, 16), woodMat, root, [1.41, 0.53, 0.52 * sz]);
   }
   // headboard (short) between the two tall posts
-  ctx.mesh(rbox(0.1, 0.86, 1.14, 0.045), woodMat, root, [1.41, 0.56, 0]);
+  ctx.mesh(rboxSmooth(THREE, 0.1, 0.86, 1.14, 0.045), woodMat, root, [1.41, 0.56, 0]);
 
   // mattress: puffy, top at y = 0.38
-  ctx.mesh(rbox(2.72, 0.22, 1.06, 0.09, 16), mattMat, root, [0, 0.27, 0]);
-  // big fluffy pillow at the headboard end: x 0.45..1.25, top at y 0.735
-  ctx.mesh(rbox(0.8, 0.36, 0.92, 0.16, 16), pillowMat, root, [0.85, 0.555, 0]);
+  ctx.mesh(rboxSmooth(THREE, 2.72, 0.22, 1.06, 0.09, 16), mattMat, root, [0, 0.27, 0]);
+  // big fluffy pillow at the headboard end: x 0.35..1.35, top at y 0.735 (same height as before, wider so the head fits)
+  ctx.mesh(rboxSmooth(THREE, 1.0, 0.36, 1.1, 0.2, 16), pillowMat, root, [0.85, 0.555, 0]);
 
   // ---------- blanket (covering) ----------
   const blanketG = new THREE.Group();
@@ -148,24 +120,26 @@ export function build(THREE, ctx) {
   ctx.mesh(quiltGeometry(), quiltMat, blanketG, [0, 0, 0]);
 
   // ---------- folded blanket (idle, at the foot of the bed) ----------
-  const foldMesh = ctx.mesh(rbox(0.5, 0.1, 0.94, 0.04), quiltMat, root, [-1.0, 0.43, 0]);
+  const foldMesh = ctx.mesh(rboxSmooth(THREE, 0.5, 0.1, 0.94, 0.04), quiltMat, root, [-1.0, 0.43, 0]);
 
   // ---------- small rug in front ----------
-  ctx.mesh(rbox(1.5, 0.03, 0.85, 0.012, 6), rugMat, root, [0, 0.015, 1.02]);
+  ctx.mesh(rboxSmooth(THREE, 1.5, 0.03, 0.85, 0.012, 6), rugMat, root, [0, 0.015, 1.02]);
 
   // ---------- tiny side table with an alarm clock, at the headboard end ----------
   const TX = 1.8, TZ = 0.55;
   ctx.mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.05, 28), woodMat, root, [TX, 0.025, TZ]);
   ctx.mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.4, 16), woodMat, root, [TX, 0.25, TZ]);
   ctx.mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 32), woodMat, root, [TX, 0.475, TZ]);
-  ctx.mesh(rbox(0.16, 0.12, 0.07, 0.03, 6), clockMat, root, [TX, 0.56, TZ]);
+  ctx.mesh(rboxSmooth(THREE, 0.16, 0.12, 0.07, 0.03, 6), clockMat, root, [TX, 0.56, TZ]);
   ctx.mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.01, 24), faceMat, root, [TX, 0.56, TZ + 0.04], [1, 1, 1], [Math.PI / 2, 0, 0]);
   for (const s of [-1, 1]) ctx.mesh(ctx.sphere, brassMat, root, [TX + 0.075 * s, 0.645, TZ], [0.045, 0.03, 0.03]);
 
   // ---------- state ----------
   let k = 0; // 0 = folded at the foot, 1 = covering him
-  const spots = { use: { x: -1.3, y: 0.67, z: 0, yaw: 0, pose: "lie" } };
-  const anchors = { pillow: new THREE.Vector3(0.85, 0.735, 0) };
+  // use.x puts the head centre (about 1.59 from the spot) on the pillow centre at x 0.85
+  const spots = { use: { x: -0.74, y: 0.67, z: 0, yaw: 0, pose: "lie" } };
+  // pillow: centre of the pillow top. capHook: top of the near (+z) bedpost, where a cap can hang
+  const anchors = { pillow: new THREE.Vector3(0.85, 0.735, 0), capHook: new THREE.Vector3(1.41, 1.06, 0.52) };
 
   return {
     root,
@@ -183,7 +157,7 @@ export function build(THREE, ctx) {
       foldMesh.scale.set(1 - 0.2 * k, 1 - k, 1 - 0.2 * k);
     },
     dispose() {
-      root.traverse(o => { if (o.geometry && o.geometry !== ctx.sphere) o.geometry.dispose(); });
+      disposeTree(root, ctx.sphere);
       [woodMat, mattMat, pillowMat, quiltMat, rugMat, clockMat, brassMat, faceMat].forEach(m => m.dispose());
       [quiltTex, rugTex].forEach(tx => tx.dispose());
     },

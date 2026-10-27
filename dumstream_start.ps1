@@ -18,6 +18,7 @@ Write-Host "`n  DUMSTREAM START`n" -ForegroundColor Magenta
 
 # 1. Streamer.bot
 if (Get-Process "Streamer.bot" -ErrorAction SilentlyContinue) { $status["Streamer.bot"] = "already running" }
+elseif (-not (Test-Path $StreamerBot)) { $status["Streamer.bot"] = "NOT FOUND: $StreamerBot" }
 else {
     Write-Host "  Starting Streamer.bot..."
     Start-Process $StreamerBot -WorkingDirectory (Split-Path $StreamerBot)
@@ -43,6 +44,7 @@ else {
 
 # 4. OBS last, so Gary is already there when his browser source loads (OBS must start from its own folder)
 if (Get-Process "obs64" -ErrorAction SilentlyContinue) { $status["OBS"] = "already running" }
+elseif (-not (Test-Path "$ObsDir\obs64.exe")) { $status["OBS"] = "NOT FOUND: $ObsDir\obs64.exe" }
 else {
     Write-Host "  Starting OBS..."
     Start-Process "$ObsDir\obs64.exe" -WorkingDirectory $ObsDir
@@ -51,7 +53,7 @@ else {
 
 Write-Host ""
 foreach ($k in $status.Keys) {
-    $ok = $status[$k] -notlike "FAILED*"
+    $ok = ($status[$k] -notlike "FAILED*") -and ($status[$k] -notlike "NOT FOUND*")
     Write-Host ("  [{0}] {1,-13} {2}" -f ($(if ($ok) { "OK" } else { "!!" }), $k, $status[$k])) -ForegroundColor $(if ($ok) { "Green" } else { "Red" })
 }
 Write-Host "`n  Gary's control page: http://localhost:7777/control"
