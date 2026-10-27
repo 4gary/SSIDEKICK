@@ -33,7 +33,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 
-// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
+// URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon|bottom|top|left|right|cornerl|cornerr  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
 const params = new URLSearchParams(location.search);
 const CAP_TEXT = params.get("cap") ?? "COCK";
 const DEMO = params.has("demo");
@@ -76,7 +76,7 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.5;
 
 const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 80);
-const stage = { wide: false, zNear: 0.3, zFar: -0.3, zMid: 0 };
+const stage = { wide: false, zNear: 0.3, zFar: -0.3, zFarN: -0.3, zMid: 0 };
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h);
@@ -118,17 +118,27 @@ function xMaxAt(z, size = 1) {       // largest |x| at depth z where feet and ca
   }
   return m;
 }
+// depth at k between the front edge (0) and the back (1), spaced evenly on screen rather than in depth,
+// so a small Gary with a deep stage doesn't spend most of his time as a speck near the horizon
+function stageZ(k) {
+  const cz = camera.position.z, a = 1 / (cz - stage.zNear), b = 1 / (cz - stage.zFar);
+  return cz - 1 / lerp(a, b, k);
+}
+function roamZ() {                                          // half his trips use the usual depth, half the extra depth a small Gary gets
+  return Math.random() < 0.5 ? rand(stage.zFar, stage.zNear) : rand(stage.zFarN, stage.zNear);
+}
 function computeStage() {
   let zNear = -Infinity, zFar = Infinity;
   const size = settings.size, topY = 2.55 * size, topLimit = stage.wide ? 0.84 : 0.985;
-  for (let z = camera.position.z - 1.5; z >= -14; z -= 0.1) {
+  for (let z = camera.position.z - 1.5; z >= -60; z -= 0.1) {   // deep enough that a small Gary can walk right up toward the horizon
     const feet = ndc(0, 0, z).y, top = ndc(0, topY, z).y;
     const visible = feet > -0.985 && top < topLimit;
     if (visible && zNear === -Infinity) zNear = z;                 // closest he can come
-    if (visible && (top - feet) >= (stage.wide ? 0.42 : 1.1) * Math.min(1, size)) zFar = z;   // furthest before he gets too small
+    if (visible && (top - feet) >= (stage.wide ? 0.42 : 1.1) * Math.min(1, size) ** 2) zFar = z;   // furthest before he gets too small: squared, so a smaller Gary walks further back (half size goes twice as deep, up toward the top of the screen)
   }
   if (zNear === -Infinity) { zNear = 0.2; zFar = -0.2; }
   stage.zNear = zNear - 0.15; stage.zFar = Math.min(zFar, zNear - 0.3); stage.zMid = (stage.zNear + stage.zFar) / 2;
+  stage.zFarN = Math.max(stage.zFar, stage.zNear - 19.5);       // the usual full-size depth: set spots (home, sign, goodbye, talking) use it, so a small Gary's extra depth is only for roaming
 }
 
 const hemi = new THREE.HemisphereLight(0xdfefff, 0x6b5a48, 0.85);
@@ -974,11 +984,35 @@ async function say(msg) {
 // avatar settings (mode, home spot, size) come from the control page through the app, or from the URL
 const PROPS = {};   // filled in by the prop loader below; declared up here because applySettings can run at module start (?size=)
 const nav = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, heading: 0, moving: 0, speed: 0.6, nextDecision: 0, lingerUntil: 0, fixedYaw: null, modeChanged: true, offscreen: false, init: true };
-const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1 };
+const settings = { mode: null, home: { x: 0.72, z: 0 }, size: 1, baseSize: 1 };   // size is what he is drawn at: baseSize (the slider) times the layout's scale
+// screen layouts: modes that keep him to one part of the screen while he still walks around in it.
+// k is the depth band (0 = the front edge, so his feet are at the bottom of the screen; 1 = as far back as he goes),
+// x is the share of the stage width he may use (-1 = left edge, 1 = right edge), scale shrinks him so the layout doesn't cover the game.
+const LAYOUTS = {
+  bottom:  { k: [0, 0.05], x: [-1, 1], scale: 0.35 },        // a strip along the bottom edge, the whole width
+  top:     { k: [0.85, 1], x: [-1, 1], scale: 1 },           // far back, so a small line up near the top of the screen
+  left:    { k: [0, 0.7], x: [-1, -0.72], scale: 0.5 },      // a column down the left side, walking front and back
+  right:   { k: [0, 0.7], x: [0.72, 1], scale: 0.5 },
+  cornerl: { k: [0, 0.04], x: [-1, -0.78], scale: 0.35 },    // a small patch in the bottom left corner
+  cornerr: { k: [0, 0.04], x: [0.78, 1], scale: 0.35 },
+};
+function layoutClamp(L, x, z, size, margin) {                // the nearest spot inside a layout's band
+  const za = stageZ(L.k[0]), zb = stageZ(L.k[1]);
+  const cz = clamp(z, Math.min(za, zb), Math.max(za, zb)), xz = Math.max(0, xMaxAt(cz, size) - margin);
+  return [clamp(x, L.x[0] * xz, L.x[1] * xz), cz];
+}
+function outsideLayout(L) {                                   // true while he is still on his way into a layout's band
+  const size = settings.size, [x, z] = layoutClamp(L, nav.x, nav.z, size, 0.8 * size);
+  return Math.hypot(x - nav.x, z - nav.z) > 0.15 * size;
+}
 function applySettings(set = {}) {
-  if (set.mode && ["stay", "wander", "roam", "walkon"].includes(set.mode)) { settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true; }
+  if (set.mode && ["stay", "wander", "roam", "walkon", ...Object.keys(LAYOUTS)].includes(set.mode)) {
+    const was = settings.mode;
+    settings.mode = set.mode; nav.nextDecision = 0; nav.modeChanged = true;
+    if (!nav.init && (LAYOUTS[was]?.scale || 1) !== (LAYOUTS[set.mode]?.scale || 1) && job && !job.def.event) { if (job.phase === "go") job = null; else endJob(); }   // he's about to change size: get up first, don't grow mid-activity
+  }
   if (set.home) { if (typeof set.home.x === "number") settings.home.x = clamp(set.home.x, -1, 1); if (typeof set.home.z === "number") settings.home.z = clamp(set.home.z, -1, 1); }
-  if (typeof set.size === "number") { settings.size = clamp(set.size, 0.3, 2.5); if (camera.aspect) computeStage(); for (const p of Object.values(PROPS)) if (p.shown) placeProp(p); }
+  if (typeof set.size === "number") settings.baseSize = clamp(set.size, 0.3, 2.5);   // update() eases the drawn size to it (times the layout's scale)
   if (set.acts && typeof set.acts === "object") {
     const a = set.acts;
     if (a.on) for (const [k, v] of Object.entries(a.on)) if (k in settings.acts.on) settings.acts.on[k] = !!v;
@@ -1342,7 +1376,7 @@ function propSpot(p) {
 }
 function setPropAt(p, s) {
   const size = settings.size;
-  const z = lerp(stage.zFar, stage.zNear, s.fz);
+  const z = lerp(stage.zFarN, stage.zNear, s.fz);
   const xm = xMaxAt(z, size);
   const x = Math.sign(s.fx) * Math.max(0, Math.abs(s.fx) * xm - s.half * size);
   p.inst.root.position.set(x, 0, z);
@@ -1441,7 +1475,10 @@ let job = null, nextJob = 20, lastJob = "";
 function canDo(name, mode) {
   if (!settings.acts.on[name]) return false;
   const j = JOBS[name];
-  if (j) { if (!j.modes.includes(mode)) return false; if (j.prop && (!PROPS[j.prop] || !stage.wide)) return false; }   // props need the full-screen stage
+  const L = LAYOUTS[mode];                                     // layouts get the do-it-where-you-stand activities, like stay put
+  if (L && name === "lieback" && (L.k[1] > 0.1 || L.x[1] - L.x[0] < 1)) return false;   // lying down needs the front edge and room to stretch out: the bottom strip only
+  if (L && !j?.manual && outsideLayout(L)) return false;        // still walking into the layout: get there first
+  if (j) { if (!j.modes.includes(L ? "stay" : mode)) return false; if (j.prop && (!PROPS[j.prop] || !stage.wide)) return false; }   // props need the full-screen stage
   return true;
 }
 function startJob(name, force = false) {
@@ -1470,7 +1507,7 @@ function startJob(name, force = false) {
     job.path = [new THREE.Vector3(freeX(clamp(nav.x * 0.6, -xMaxAt(z, size) * 0.6, xMaxAt(z, size) * 0.6), z, xMaxAt(z, size) * 0.6), 0, z)];
   } else if (name === "butterfly") { job.path = []; job.phase = "do"; job.t0 = S.t; job.until = S.t + 15; job.at = { x: nav.x, z: nav.z }; bfStart(); return true;
   } else if (name === "lieback") {                               // lie along the bottom edge of the screen; further back he'd look like he floats in mid-air (the overlay has no visible floor)
-    const z = lerp(stage.zNear, stage.zFar, 0.12), xm = Math.max(0, xMaxAt(z, size) - 1.8 * size);
+    const z = LAYOUTS[mode] ? stageZ(LAYOUTS[mode].k[1]) : lerp(stage.zNear, stage.zFarN, 0.12), xm = Math.max(0, xMaxAt(z, size) - 1.8 * size);
     job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)];
   } else job.path = [new THREE.Vector3(nav.x, 0, nav.z)];
   if (name === "lieback") job.dir = job.path[0].x > 0 ? -1 : 1;            // head toward the middle of the screen
@@ -2170,8 +2207,8 @@ function startJob3(name, size) {
     job.path = [propPt(p, s.x, 0, s.z + 0.4), propPt(p, s.x, 0, s.z)];
   } else if (job.def.event) eventStart(name, pendingInfo, size);
   else if (name === "fishing") { const z = stage.zNear, xm = Math.max(0, xMaxAt(z, size) - 1.4 * size); job.path = [new THREE.Vector3(freeX(clamp(nav.x, -xm, xm), z, xm), 0, z)]; }
-  else if (name === "goodbye") job.path = [new THREE.Vector3(0, 0, lerp(stage.zFar, stage.zNear, 0.7))];
-  else if (name === "sign") job.path = [new THREE.Vector3(freeX(clamp(nav.x, -1.5 * size, 1.5 * size), lerp(stage.zFar, stage.zNear, 0.6), 1.5 * size), 0, lerp(stage.zFar, stage.zNear, 0.6))];
+  else if (name === "goodbye") job.path = [new THREE.Vector3(0, 0, lerp(stage.zFarN, stage.zNear, 0.7))];
+  else if (name === "sign") job.path = [new THREE.Vector3(freeX(clamp(nav.x, -1.5 * size, 1.5 * size), lerp(stage.zFarN, stage.zNear, 0.6), 1.5 * size), 0, lerp(stage.zFarN, stage.zNear, 0.6))];
   else if (name === "chatfloor") job.path = [new THREE.Vector3(clamp(nav.x, -1.5, 1.5), 0, stage.zNear)];
   if (name === "read") { job.kind = Math.random() < 0.5 ? "paper" : "book"; job.seated = job.kind === "book" && Math.random() < 0.6; }
   if (name === "snack") job.food = Math.random() < 0.5 ? "pizza" : "chips";
@@ -2618,14 +2655,14 @@ function buildJ(t, dt, ap) {
   thinkItems(t);
   // stream mode extras: the disco ball in party mode, the banner
   discoOn = smooth(discoOn, scene_().disco ? 1 : 0, 2, dt);
-  if (discoOn > 0.02) itemWorld("disco", screenPt(0, 0.9, stage.zFar + 0.3), new THREE.Quaternion(), 1.6 * settings.size, { on: discoOn });
+  if (discoOn > 0.02) itemWorld("disco", screenPt(0, 0.9, stage.zFarN + 0.3), new THREE.Quaternion(), 1.6 * settings.size, { on: discoOn });
   if (S.t < bannerUntil) itemWorld("banner", screenPt(0, -0.72, 2), camera.quaternion, 1.3, { k: Math.min(seg(S.t - bannerT0, 0, 0.6), seg(bannerUntil - S.t, 0, 0.5)) });
   plantWet = Math.max(0, plantWet - dt / 60);
   // props: show the one in use (or all, if set to always), spring them in and out with a poof
   for (const [name, p] of Object.entries(PROPS)) {
     const inUse = job && job.p === p;
     if (inUse) p.linger = t + 2;
-    const want = settings.acts.props === "always" || inUse || t < p.linger;
+    const want = (settings.acts.props === "always" && !LAYOUTS[currentMode()]) || inUse || t < p.linger;   // a layout keeps the screen clear
     if (want && !p.shown) { placeProp(p); p.shown = true; p.spring.x = 0; p.spring.v = 0; poof(p.inst.root.position, 14, 1.2 * settings.size); }
     if (!want && p.shown) { p.shown = false; poof(p.inst.root.position, 10, 1.2 * settings.size); }
     const s = p.spring.update(dt, p.shown ? 1 : 0);
@@ -2654,6 +2691,14 @@ function buildJ(t, dt, ap) {
 
 function update(dt) {
   const t = (S.t += dt);
+  {                                                            // ease to the slider size times the layout's scale (snaps on the first frame)
+    const goal = settings.baseSize * (LAYOUTS[currentMode()]?.scale || 1);
+    if (Math.abs(settings.size - goal) > 0.002) {
+      settings.size = nav.init ? goal : smooth(settings.size, goal, 3, dt);
+      if (camera.aspect) computeStage();
+      for (const p of Object.values(PROPS)) if (p.shown) placeProp(p);
+    }
+  }
   const size = settings.size;
 
   // ---- voice loudness and rough vowel shape from the audio
@@ -2681,7 +2726,7 @@ function update(dt) {
   // ---- where to go: modes
   const mode = currentMode();
   const margin = 0.8 * size;
-  const homeZ = lerp(stage.zFar, stage.zNear, (settings.home.z + 1) / 2 * 0.6 + 0.3);
+  const homeZ = lerp(stage.zFarN, stage.zNear, (settings.home.z + 1) / 2 * 0.6 + 0.3);
   const homeX = settings.home.x * Math.max(0, xMaxAt(homeZ, size) - margin) * (stage.wide ? 1 : 0.5);
   const xm = Math.max(0, xMaxAt(nav.z, size) - margin);
   nav.offscreen = Math.abs(nav.x) > xMaxAt(nav.z, size) + 0.9 * size;
@@ -2699,12 +2744,12 @@ function update(dt) {
     speed = 0.95 * size;
     if (want) {
       if (nav.offscreen) { nav.tx = Math.sign(nav.x) * Math.max(0, xm - 0.3); nav.tz = nav.z; speed = 1.4 * size; }
-      else if (nav.z < stage.zFar + (stage.zNear - stage.zFar) * 0.35) { nav.tx = clamp(nav.x, -xm, xm); nav.tz = lerp(stage.zFar, stage.zNear, 0.5); }  // come closer to talk
+      else if (nav.z < stage.zFarN + (stage.zNear - stage.zFarN) * 0.35) { nav.tx = clamp(nav.x, -xm, xm); nav.tz = lerp(stage.zFarN, stage.zNear, 0.5); }  // come closer to talk
       else { nav.tx = clamp(nav.x, -xm, xm); nav.tz = nav.z; }
       nav.nextDecision = t + rand(3, 6);
     } else if (t > nav.nextDecision) {
       if (nav.offscreen) {                                         // waiting in the wings: re-enter, sometimes from the other side
-        nav.z = rand(stage.zFar, stage.zNear);
+        nav.z = roamZ();
         const side = Math.random() < 0.5 ? Math.sign(nav.x) : -Math.sign(nav.x);
         nav.x = side * (xMaxAt(nav.z, size) + 2.2 * size);
         nav.tx = side * rand(0.2, 0.8) * Math.max(0, xMaxAt(nav.z, size) - margin); nav.tz = nav.z;
@@ -2712,7 +2757,7 @@ function update(dt) {
       } else {
         // the smaller he is, the more often he heads right out to an edge of the screen (at size 1 about 1 trip in 6, at 0.5 about 1 in 2)
         const edgy = clamp(0.15 + (1 - size) * 0.7, 0.1, 0.65);
-        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear), xz = Math.max(0, xMaxAt(z, size) - margin * (size < 1 ? 0.6 : 1)); return [(Math.random() < edgy ? (Math.random() < 0.5 ? -1 : 1) * rand(0.82, 1) : rand(-1, 1)) * xz, z]; });
+        [nav.tx, nav.tz] = freeTarget(() => { const z = roamZ(), xz = Math.max(0, xMaxAt(z, size) - margin * (size < 1 ? 0.6 : 1)); return [(Math.random() < edgy ? (Math.random() < 0.5 ? -1 : 1) * rand(0.82, 1) : rand(-1, 1)) * xz, z]; });
         nav.nextDecision = t + rand(3, 9);
       }
     }
@@ -2721,12 +2766,26 @@ function update(dt) {
     if (want || t < nav.lingerUntil) { nav.tx = homeX; nav.tz = homeZ; speed = (want && nav.offscreen) ? 1.5 * size : 0.9 * size; }
     else { nav.tx = offX; nav.tz = homeZ; speed = 0.8 * size; }
     if (nav.modeChanged && !want) { nav.x = offX; nav.z = homeZ; }
+  } else if (LAYOUTS[mode]) {                                  // a screen layout: walks around inside his band, stops where he is to talk
+    const L = LAYOUTS[mode];
+    speed = 0.85 * size;                                       // a bit brisker than wander: a strip is a long way at his smaller size
+    if (want) { nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = t + rand(2, 4); }
+    else if (t > nav.nextDecision) {
+      [nav.tx, nav.tz] = freeTarget(() => {
+        const z = stageZ(rand(L.k[0], L.k[1])), xz = Math.max(0, xMaxAt(z, size) - margin) || 1;
+        const f = Math.random() < 0.3 ? clamp(nav.x / xz + rand(-0.3, 0.3), L.x[0], L.x[1]) : rand(L.x[0], L.x[1]);   // a few steps along, or a trip across
+        return [f * xz, z];
+      });
+      nav.nextDecision = t + rand(3, 10);
+    }
+    if (!job) [nav.tx, nav.tz] = layoutClamp(L, nav.tx, nav.tz, size, margin);
+    if (!job && outsideLayout(L)) speed = 1.4 * size;            // just switched: hurry over
   }
   if (nav.modeChanged) { nav.modeChanged = false; if (mode === "stay" || mode === "wander") { nav.tx = homeX; nav.tz = homeZ; } }
-  if (nav.init) { nav.init = false; if (mode !== "walkon") { nav.x = nav.tx = homeX; nav.z = nav.tz = homeZ; } }
+  if (nav.init) { nav.init = false; if (LAYOUTS[mode]) { nav.x = nav.tx; nav.z = nav.tz; } else if (mode !== "walkon") { nav.x = nav.tx = homeX; nav.z = nav.tz = homeZ; } }
   if (!stage.wide) { nav.tx = clamp(nav.tx, -xm, xm); nav.tz = clamp(nav.tz, stage.zFar, stage.zNear); }
 
-  if (scene_().front && !job) nav.tz = Math.max(nav.tz, lerp(stage.zFar, stage.zNear, 0.65));   // chatting: hangs near the camera
+  if (scene_().front && !job && !LAYOUTS[mode]) nav.tz = Math.max(nav.tz, lerp(stage.zFarN, stage.zNear, 0.65));   // chatting: hangs near the camera
   if (((act.name && BITS[act.name]) || dream.on) && t < (nav.holdUntil || 0)) { nav.tx = nav.x; nav.tz = nav.z; }   // a bit plays where he stands, even in stay mode away from home
   const jn = jobUpdate(t, dt, want, mode, size);               // an activity steers him to its spot
   if (jn) { nav.tx = jn.x; nav.tz = jn.z; speed = jn.speed; }
