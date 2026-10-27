@@ -363,13 +363,14 @@ const hips = group(squash, [0, 0.46, 0]);
 const torso = group(hips);
 
 // body: a chubby lathe, striped tee, dark collar, belt line
+const SLIM = 0.90;                                 // g asked for a slightly slimmer torso (2026-10-27): scales the belly, jeans top and belt, not the shoulders
 const bodyProfile = [[0.30, 0.0], [0.335, 0.12], [0.34, 0.28], [0.325, 0.44], [0.29, 0.56], [0.22, 0.64], [0.14, 0.69], [0.0, 0.70]]
-  .map(([r, y]) => new THREE.Vector2(r, y));
+  .map(([r, y]) => new THREE.Vector2(r * SLIM, y));
 const body = mesh(new THREE.LatheGeometry(bodyProfile, 48), M.shirt, torso, [0, 0, 0], [1, 1, 0.86]);
 mesh(new THREE.TorusGeometry(0.145, 0.03, 12, 40), new THREE.MeshStandardMaterial({ color: 0x101c26, roughness: 0.9 }), torso, [0, 0.685, 0.0], [1, 1, 0.86], [Math.PI / 2, 0, 0]);
 mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.18, 24), M.skin, torso, [0, 0.66, 0.0]);          // short neck: shows between the chin and the collar
-mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
-mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
+mesh(new THREE.CylinderGeometry(0.315 * SLIM, 0.30 * SLIM, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
+mesh(new THREE.TorusGeometry(0.31 * SLIM, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
 
 // ------------------------------------------------------------ one-piece limbs
 // Each arm and leg is ONE skinned tube from the top joint to the wrist or ankle, weighted across its three bones, so
@@ -411,7 +412,7 @@ function limbTube(bones, profile, blends, mat, seg = 40) {
   sm.bind(new THREE.Skeleton(bones));
   return sm;
 }
-const HAND_YAW = 0.6;                              // rest hands: palm toward the thigh and a little back, thumb forward
+const HAND_YAW = 0.6;                              // how far the back of the hand turns toward the camera from palm-in (0 = palm flat on the thigh)
 function handMesh(side) {
   // metaballs in hand space (y down the arm, fingers at -y, back of the hand at +z, thumb toward -x*side), polygonised once.
   // Four fingers and a thumb are capsules (max of a blob chain) added to the palm field; negative blobs carve the grooves; a relaxed curl.
@@ -466,7 +467,7 @@ function handMesh(side) {
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
   g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-  g.rotateY(HAND_YAW * side);                                       // thumb swung forward: the camera sees the back of the hand at an angle, thumb in front
+  g.rotateY(Math.PI - HAND_YAW * side);                             // into the bone's frame (its +z is the inside of the elbow): palm to the thigh, back of the hand out and a little forward, thumb forward
   if (params.has("preview")) console.log("hand", side, n / 3, "tris");
   return g;
 }
@@ -1205,8 +1206,8 @@ function bodyR(y) {
   for (let i = 1; i < BODY_R.length; i++) if (y <= BODY_R[i][1]) { const [r0, y0] = BODY_R[i - 1], [r1, y1] = BODY_R[i]; return lerp(r0, r1, (y - y0) / (y1 - y0)); }
   return 0;
 }
-const ARM_PTS = [["sh", -0.15, 0.07, 0], ["el", 0, 0.064, 0], ["el", -0.13, 0.064, 1], ["hand", -0.04, 0.068, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
-const _kp = new THREE.Vector3(), _kh = new THREE.Vector3(), _kq = new THREE.Quaternion();
+const ARM_PTS = [["sh", -0.15, 0.07, 0], ["el", 0, 0.064, 0], ["el", -0.13, 0.064, 1], ["hand", -0.04, 0.068, 1], ["hand", -0.12, 0.05, 1]];   // mid upper arm, elbow, mid forearm, palm; radii match the built limbs. last: 0 = elbow end, 1 = hand end
+const _kp = new THREE.Vector3(), _kh = new THREE.Vector3(), _kq = new THREE.Quaternion(), _kv = new THREE.Vector3(), _ky = new THREE.Vector3();
 function armHit(arm, k, which) {            // deepest point of this end of the arm inside the body: {pen, p, r}
   let best = null;
   for (const [bone, y, rad, end] of ARM_PTS) {
@@ -1225,7 +1226,7 @@ function keepArmOut(arm, k, reach) {
     arm.sh.updateMatrixWorld(true);
     let h = reach ? null : armHit(arm, k, 1);
     if (h) {                                 // hand or forearm inside: swing the whole arm so the hand comes out (mostly forward when it's in front)
-      const v = h.p.sub(SP), len = v.length(); if (len < 0.05) return;
+      const v = h.p.sub(SP), len = v.length(); if (len < 0.05) break;
       const axis = v.clone().cross(h.r); if (axis.lengthSq() < 1e-8) axis.set(0, 0, arm.side);
       arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(axis.normalize(), Math.min(0.5, (h.pen + 0.005) / len)));
       continue;
@@ -1236,13 +1237,23 @@ function keepArmOut(arm, k, reach) {
     const ax = _kh.sub(SP).normalize(), v = h.p.sub(SP), perp = v.clone().sub(ax.clone().multiplyScalar(ax.dot(v))), dist = perp.length();
     const rt = h.r.clone().sub(ax.clone().multiplyScalar(ax.dot(h.r)));
     if (dist < 0.03 || rt.lengthSq() < 0.05) {
-      if (reach) return;                     // can't swing it clear without moving the hand off what it holds
+      if (reach) break;                      // can't swing it clear without moving the hand off what it holds: the last resort below moves it a little
       const axis = v.clone().cross(h.r); if (axis.lengthSq() < 1e-8) axis.set(0, 0, arm.side);
       arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(axis.normalize(), Math.min(0.5, (h.pen + 0.005) / v.length())));
       continue;
     }
     const sign = ax.clone().cross(perp).dot(rt) >= 0 ? 1 : -1;
     arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(ax, sign * Math.min(0.8, (h.pen + 0.005) / dist)));
+  }
+  // last resort (2026-10-27, g: "arms still go through his body"): whatever is still inside, yaw the whole arm about the
+  // shoulder's vertical so that point moves out along the body's normal. The hand drifts a little; an arm through the belly looks worse.
+  for (let pass = 0; pass < 8; pass++) {
+    arm.sh.updateMatrixWorld(true);
+    const h0 = armHit(arm, k, 0), h1 = armHit(arm, k, 1), h = h0 && h1 ? (h0.pen > h1.pen ? h0 : h1) : (h0 || h1);
+    if (!h) return;
+    const v = h.p.sub(SP), len = Math.max(0.08, v.length());
+    const dir = _kv.set(0, 1, 0).cross(v).dot(h.r) >= 0 ? 1 : -1;
+    arm.sh.quaternion.premultiply(_kq.setFromAxisAngle(_ky.set(0, 1, 0), dir * Math.min(0.35, (h.pen + 0.005) / len)));
   }
 }
 const _hp = new THREE.Vector3();
