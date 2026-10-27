@@ -1,4 +1,6 @@
 // Upright arcade cabinet "DUMSTREAM" (cartoon style). Front faces +z, origin on the floor at the centre.
+import { star } from './common.js';
+
 export function build(THREE, ctx) {
   const PI = Math.PI;
   const root = new THREE.Group();
@@ -32,14 +34,6 @@ export function build(THREE, ctx) {
   function rrClip(g, w, h, r) {
     g.beginPath(); g.moveTo(r, 0); g.arcTo(w, 0, w, h, r); g.arcTo(w, h, 0, h, r); g.arcTo(0, h, 0, 0, r); g.arcTo(0, 0, w, 0, r);
     g.closePath(); g.clip();
-  }
-  function star(g, cx, cy, R, r) {
-    g.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = -PI / 2 + (i * PI) / 5, rad = i % 2 ? r : R;
-      g.lineTo(cx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
-    }
-    g.closePath();
   }
   // right side: red/navy/yellow diagonal stripes, navy band with stars
   function artRight(g, w, h) {
@@ -227,7 +221,8 @@ export function build(THREE, ctx) {
   // ---------- plinth, body, top with marquee ----------
   ctx.mesh(slabY(0.76, 0.74, 0.12, 0.04), mDark, root, [0, 0.06, -0.05]);
   ctx.mesh(slabY(0.80, 0.70, 1.66, 0.07, 0.03), mBody, root, [0, 0.12 + 0.83, -0.05]);
-  // header box is set back from the screen housing so Gary's crown (base at y 1.81) clears it
+  // header box is set back (z -0.12) from the screen housing so Gary's head does not clip it when he stands at the screen;
+  // cabinet top is y 2.0, below his skull top (about 2.24 at byte3d scale 1)
   ctx.mesh(slabY(0.81, 0.57, 0.04, 0.05, 0.012), mTrim, root, [0, 1.78, -0.12]);
   ctx.mesh(slabY(0.80, 0.56, 0.22, 0.07, 0.03), mBody, root, [0, 1.89, -0.12]);
 
@@ -299,15 +294,17 @@ export function build(THREE, ctx) {
     screen: new THREE.Vector3(0, 1.375, 0.34),                              // centre of the screen
   };
   let scrAcc = 0;
+  const NO_PRESS = [];   // shared empty default, so update() does not allocate each frame
 
   return {
     root,
-    spots: { use: { x: 0, y: 0, z: 1.0, yaw: PI, pose: 'stand' } },
+    // with the slot yaw of -0.75 his total yaw is 1.66, a profile facing the screen; he stands left of the cabinet front
+    spots: { use: { x: -0.55, y: 0, z: 0.95, yaw: 2.41, pose: 'stand' } },
     anchors,
     update(dt, t = 0, st = {}) {
       dt = Math.max(0, Math.min(dt, 0.05));
       const active = !!st.active;
-      const press = st.press || [];
+      const press = st.press || NO_PRESS;
 
       // joystick tilt (smoothed); the stick anchor follows the moving ball
       const tx = active ? clamp1(st.stick?.x) : 0, ty = active ? clamp1(st.stick?.y) : 0;
@@ -335,7 +332,7 @@ export function build(THREE, ctx) {
     },
     dispose() {
       root.traverse((o) => {
-        if (o.geometry) o.geometry.dispose();
+        if (o.geometry && o.geometry !== ctx.sphere) o.geometry.dispose();   // ctx.sphere is shared (the joystick ball)
         if (o.material) {
           const mats = Array.isArray(o.material) ? o.material : [o.material];
           for (const m of mats) { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); }

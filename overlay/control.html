@@ -19,8 +19,12 @@
   button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; }
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
   button.mode.active { background: var(--accent); border-color: var(--accent); }
+  button.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
+  #pause.paused { border-color: var(--bad); color: var(--bad); }
   .pill { padding: 3px 9px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  #status { gap: 6px; }
+  #hint { font-size: 13px; color: var(--bad); }
   label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
   #log { height: 340px; overflow-y: auto; font: 12.5px/1.45 Consolas, monospace; white-space: pre-wrap; color: var(--muted); }
   #log .say { color: var(--text); }
@@ -33,8 +37,9 @@
 <body>
 <main>
   <div class="row"><h1>Sidekick control</h1><span style="flex:1"></span>
-    <button class="ghost" id="pause">Pause</button><button class="ghost" id="skip">Skip line</button><button class="ghost" id="refresh">Refresh</button></div>
-  <div class="card row" id="status"></div>
+    <button class="ghost" id="pause" data-confirm="Click again to pause">Pause</button><button class="ghost" id="skip">Skip line</button><button class="ghost" id="refresh">Refresh</button></div>
+  <div class="card row" id="status"><span class="pill">Sidekick: <b class="muted">connecting...</b></span></div>
+  <div id="hint" style="display:none"></div>
   <div class="card">
     <label>Talk to the sidekick as yourself (this can trigger Streamer.bot actions)</label>
     <form class="row" id="fStreamer"><input id="streamer" placeholder="Gary, what do you think of this boss?" autocomplete="off"><button>Send</button></form>
@@ -57,7 +62,7 @@
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px">Stay put: stands still. Wander: paces around his spot. Free roam: walks the whole screen, near and far. Walk on: hidden until he has something to say.</div>
     <div class="row" style="margin-top:10px">
-      <label style="display:flex;align-items:center;gap:8px;margin:0">Home spot <select id="home"><option value="-0.7">Left (-0.7)</option><option value="0">Center (0)</option><option value="0.7" selected>Right (0.7)</option></select></label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0">Home spot <select id="home"><option value="-0.7">Left (-0.7)</option><option value="0">Center (0)</option><option value="0.7">Right (0.7)</option></select></label>
       <label style="display:flex;align-items:center;gap:8px;margin:0">Size <input type="range" id="size" min="0.5" max="1.6" step="0.05" value="1"> <span id="sizeVal">1.0×</span></label>
     </div>
   </div>
@@ -65,12 +70,12 @@
     <label>What the 3D sidekick does on his own (3D overlay only)</label>
     <div id="acts" class="acts"></div>
     <div class="row" style="margin-top:10px">
-      <label style="display:flex;align-items:center;gap:8px;margin:0">How often <select id="actGap"><option value="2">Now and then</option><option value="1" selected>Normal</option><option value="0.5">A lot</option></select></label>
-      <label style="display:flex;align-items:center;gap:8px;margin:0">Props <select id="actProps"><option value="use" selected>Only while he uses them</option><option value="always">Always out</option></select></label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0">How often <select id="actGap"><option value="2">Now and then</option><option value="1">Normal</option><option value="0.5">A lot</option></select></label>
+      <label style="display:flex;align-items:center;gap:8px;margin:0">Props <select id="actProps"><option value="use">Only while he uses them</option><option value="always">Always out</option></select></label>
       <label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="actSfx" checked style="flex:0 0 auto;min-width:0;width:16px;height:16px;accent-color:var(--accent)"> Sound effects</label>
       <button class="ghost" id="actStop">Stop what he's doing</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:8px">Tick what he's allowed to do when nobody is talking to him. "Do it" makes him do it right now. He drops anything the moment he has something to say. Props only show up while he walks over to use them. The DJ deck, couch, bed, arcade, desk, butterfly, gym, fridge, plant and easel need Wander or Free roam. Sign, marble race and goodbye only happen when you press Do it.</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Tick what he's allowed to do when nobody is talking to him. "Do it" makes him do it right now. He drops anything the moment he has something to say. Props only show up while he walks over to use them. The DJ deck, couch, bed, arcade, desk, butterfly, gym, fridge, plant and easel need Wander or Free roam. Sign, marble race and goodbye are manual: they only happen when you press Do it, unless a stream mode plays them (Starting soon and BRB hold a sign, Marble race cheers, Ending waves goodbye).</div>
   </div>
   <div class="card">
     <label>Stream mode (3D overlay only): changes what he does to fit the moment</label>
@@ -90,87 +95,161 @@
       <button class="ghost" data-ev="follow">Follow</button><button class="ghost" data-ev="hype">Hype</button><button class="ghost" data-ev="rip">RIP</button><button class="ghost" data-ev="redeem">Redeem</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px">These only play the animation and sound on the overlay. Gary won't say anything.</div>
+    <div class="row" style="margin-top:8px"><span style="font-size:12px;color:var(--muted)">Full alert, he talks too (the same path a real one takes):</span>
+      <button class="ghost" data-alert="raid">Raid</button><button class="ghost" data-alert="sub">Sub</button><button class="ghost" data-alert="bits">Bits</button><button class="ghost" data-alert="follow">Follow</button></div>
   </div>
   <div class="card"><label>Log</label><div id="log"></div></div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let ws;
-const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
-function form(id, input, fn) { $(id).onsubmit = e => { e.preventDefault(); const v = $(input).value.trim(); if (v) { fn(v); $(input).value = ""; } }; }
+let ws, paused = false;
+// every send reports whether the socket was open; callers clear their input only when it was
+const send = o => { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(o)); return true; } return false; };
+let hintTimer = 0;
+function hint(text) {
+  const h = $("hint"); h.textContent = text; h.style.display = "block";
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => { h.style.display = "none"; }, 4000);
+}
+const NOT_SENT = "Not connected to Sidekick, so nothing was sent. Your text is still in the box.";
+function form(id, input, fn) {
+  $(id).onsubmit = e => { e.preventDefault(); const v = $(input).value.trim(); if (!v) return; if (fn(v)) $(input).value = ""; else hint(NOT_SENT); };
+}
 form("fStreamer", "streamer", t => send({ type: "streamer", text: t }));
 form("fChat", "chat", t => send({ type: "chat", user: $("chatUser").value, text: t }));
 form("fEvent", "event", t => send({ type: "event", text: t }));
-$("sayExact").onclick = () => { const v = $("event").value.trim(); if (v) { send({ type: "say", text: v }); $("event").value = ""; } };
+$("sayExact").onclick = () => { const v = $("event").value.trim(); if (!v) return; if (send({ type: "say", text: v })) $("event").value = ""; else hint(NOT_SENT); };
 $("idleNow").onclick = () => send({ type: "idle_now" });
-$("pause").onclick = () => send({ type: "pause" });
+
+// Pause needs a second click within 3 s (Gary may be mid-line); Resume is a single click
+function twoStep(b, fn) {
+  if (b._t) { clearTimeout(b._t); b._t = 0; b.classList.remove("armed"); b.textContent = b._label; fn(); return; }
+  b._label = b.textContent; b.textContent = b.dataset.confirm; b.classList.add("armed");
+  b._t = setTimeout(() => { b._t = 0; b.classList.remove("armed"); b.textContent = b._label; }, 3000);
+}
+$("pause").onclick = () => {
+  const b = $("pause");
+  if (paused) { if (!send({ type: "pause", paused: false })) hint("Not connected to Sidekick."); }
+  else twoStep(b, () => { if (!send({ type: "pause", paused: true })) hint("Not connected to Sidekick."); });
+};
 $("skip").onclick = () => send({ type: "skip" });
 $("refresh").onclick = () => send({ type: "refresh" });
-document.querySelectorAll("button.mode").forEach(b => b.onclick = () => { send({ type: "avatar", set: { mode: b.dataset.mode } }); applyAvatar({ mode: b.dataset.mode }); });
+function showPause() {
+  const b = $("pause");
+  b.classList.toggle("paused", paused);
+  if (b._t) b._label = paused ? "Resume" : "Pause"; else b.textContent = paused ? "Resume" : "Pause";
+}
+function setMode(mode) { document.querySelectorAll("button.mode").forEach(b => b.classList.toggle("active", b.dataset.mode === mode)); }
+document.querySelectorAll("button.mode").forEach(b => b.onclick = () => { send({ type: "avatar", set: { mode: b.dataset.mode } }); setMode(b.dataset.mode); });
+// the server merges home, so send only x here (z belongs to the dock's Back / Bottom spots)
 $("home").onchange = () => send({ type: "avatar", set: { home: { x: Number($("home").value) } } });
 $("size").oninput = () => { $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; };
 $("size").onchange = () => send({ type: "avatar", set: { size: Number($("size").value) } });
-const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose, flick it"], ["armpit", "Sniff armpit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Chase a butterfly"],
+const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose, flick it"], ["armpit", "Sniff armpit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Chase a butterfly"], ["daydream", "Daydream (silent thought bubble)"],
   ["yawn", "Big yawn"], ["knuckles", "Crack knuckles"], ["watch", "Check his watch"], ["shoe", "Tie his shoe"], ["whistle", "Whistle a tune"], ["mutter", "Mutter to himself"], ["embarrassed", "Get embarrassed"], ["mictest", "Mic check"],
   ["stare", "Stare at the viewer"], ["phone", "Texting on his phone"], ["lieback", "Lie on his back"], ["dj", "DJ set"], ["couch", "Chill on the couch"], ["nap", "Nap in bed"], ["arcade", "Play arcade"], ["desk", "Sit at his desk"], ["desknap", "Doze off at the desk"],
   ["floorsit", "Sit on the floor"], ["snack", "Eat a snack"], ["read", "Read a book or paper"], ["ball", "Juggle a ball"], ["fishing", "Go fishing"], ["exercise", "Work out"], ["punch", "Punching bag"], ["yoga", "Yoga"], ["beer", "Drink a beer"], ["plant", "Water his plant"], ["paint", "Paint a picture"],
   ["sign", "Hold up a sign"], ["marble", "Cheer the marble race"], ["goodbye", "Wave goodbye and leave"]];
 const MANUAL = new Set(["sign", "marble", "goodbye"]);
-const actState = { on: Object.fromEntries(ACTS.filter(([k]) => !MANUAL.has(k)).map(([k]) => [k, true])), gap: 1, props: "use", scene: "normal", sfx: true };
+// actState mirrors the server's avatar.acts. It is replaced from every status and sent whole on each change.
+const actState = { on: Object.fromEntries(ACTS.filter(([k]) => !MANUAL.has(k)).map(([k]) => [k, true])), gap: 1, props: "use", scene: "normal", sfx: true, sceneAt: undefined };
 $("acts").innerHTML = ACTS.map(([k, n]) => `<div class="act">${MANUAL.has(k) ? '<span style="flex:0 0 16px"></span>' : `<input type="checkbox" data-act="${k}" checked>`}<span>${n}</span><button class="ghost" data-do="${k}">Do it</button></div>`).join("");
+// sceneAt is kept from the server: stamping it on every change would make the overlay replay the stream-mode opener
 const sendActs = () => send({ type: "avatar", set: { acts: actState } });
 document.querySelectorAll("[data-act]").forEach(c => c.onchange = () => { actState.on[c.dataset.act] = c.checked; sendActs(); });
 document.querySelectorAll("[data-do]").forEach(b => b.onclick = () => send({ type: "avatar", set: { do: { name: b.dataset.do, at: Date.now() } } }));
 $("actStop").onclick = () => send({ type: "avatar", set: { do: { name: "stop", at: Date.now() } } });
 $("actSfx").onchange = () => { actState.sfx = $("actSfx").checked; sendActs(); };
-$("scene").onchange = () => { actState.scene = $("scene").value; send({ type: "avatar", set: { acts: { ...actState, sceneAt: Date.now() } } }); };
+$("scene").onchange = () => { actState.scene = $("scene").value; actState.sceneAt = Date.now(); sendActs(); };
 const EV = { raid: { name: "raid", n: 42 }, sub: { name: "sub" }, resub: { name: "sub", months: 7 }, bits: { name: "bits", n: 500 }, follow: { name: "follow" }, hype: { name: "hype" }, rip: { name: "rip" }, redeem: { name: "redeem", title: "Hydrate" } };
 document.querySelectorAll("[data-ev]").forEach(b => b.onclick = () => send({ type: "avatar", set: { do: { ...EV[b.dataset.ev], who: $("evWho").value || "someone", at: Date.now() } } }));
+const ALERT = { raid: { viewers: 42 }, sub: { months: 1 }, bits: { kind: "cheer", bits: 500 }, follow: {} };
+document.querySelectorAll("[data-alert]").forEach(b => b.onclick = () => { const a = ALERT[b.dataset.alert]; send({ type: "alert", kind: b.dataset.alert, user: $("evWho").value || "someone", ...a }); });
 $("actGap").onchange = () => { actState.gap = Number($("actGap").value); sendActs(); };
 $("actProps").onchange = () => { actState.props = $("actProps").value; sendActs(); };
+
+// Home spot options are 0.7 steps; the dock uses 0.72, so round to the nearest option
+const HOME_STEPS = [-0.7, 0, 0.7];
+function homeOption(x) {
+  const n = typeof x === "number" ? x : 0.72;
+  return String(HOME_STEPS.reduce((best, v) => Math.abs(v - n) < Math.abs(best - n) ? v : best));
+}
+function pick(sel, value, fallback) {
+  const el = $(sel);
+  el.value = [...el.options].some(o => o.value === String(value)) ? String(value) : fallback;
+}
+// Every control on this page comes from the server's avatar object (status and hello), so a reload or a
+// server restart shows what the server has, never this page's defaults.
 function applyAvatar(a) {
-  if (a.acts) {
-    Object.assign(actState.on, a.acts.on || {}); if (a.acts.gap) actState.gap = a.acts.gap; if (a.acts.props) actState.props = a.acts.props;
-    if (a.acts.scene) actState.scene = a.acts.scene; if (a.acts.sfx !== undefined) actState.sfx = a.acts.sfx;
-    $("scene").value = actState.scene; $("actSfx").checked = actState.sfx !== false;
-    document.querySelectorAll("[data-act]").forEach(c => c.checked = actState.on[c.dataset.act] !== false);
-    $("actGap").value = String(actState.gap); $("actProps").value = actState.props;
-  }
-  if (a.mode !== undefined) document.querySelectorAll("button.mode").forEach(b => b.classList.toggle("active", b.dataset.mode === a.mode));
-  if (a.home) $("home").value = String(a.home.x);
-  if (a.size !== undefined) { $("size").value = a.size; $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; }
+  const acts = a.acts || {}, on = acts.on || {};
+  actState.on = Object.fromEntries(ACTS.filter(([k]) => !MANUAL.has(k)).map(([k]) => [k, on[k] !== false]));
+  actState.gap = typeof acts.gap === "number" ? acts.gap : 1;
+  actState.props = acts.props || "use";
+  actState.scene = acts.scene || "normal";
+  actState.sfx = acts.sfx !== false;
+  actState.sceneAt = acts.sceneAt;
+  document.querySelectorAll("[data-act]").forEach(c => c.checked = actState.on[c.dataset.act]);
+  $("actSfx").checked = actState.sfx;
+  pick("actGap", actState.gap, "1");
+  pick("actProps", actState.props, "use");
+  pick("scene", actState.scene, "normal");
+  setMode(a.mode);
+  pick("home", homeOption(a.home && a.home.x), "0.7");
+  const size = typeof a.size === "number" ? a.size : 1;
+  $("size").value = size; $("sizeVal").textContent = size.toFixed(1) + "×";
 }
 
-function pill(label, ok, text) { return `<span class="pill">${label}: <b class="${ok ? "ok" : "bad"}">${text}</b></span>`; }
-function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function pill(label, state, text) {
+  const cls = state === "ok" ? "ok" : state === "bad" ? "bad" : "muted";
+  return `<span class="pill">${label}: <b class="${cls}">${text}</b></span>`;
+}
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function renderStatus(m) {
+  const f = m.features || {}, lm = String(m.lm || "");
+  paused = !!m.paused;
+  showPause();
+  $("status").innerHTML = [
+    pill("LM Studio", lm.startsWith("LM Studio OK") ? "ok" : "bad", esc(lm.replace("LM Studio OK, using model: ", ""))),
+    pill("Overlay", m.overlays > 0 ? "ok" : "bad", m.overlays > 0 ? "connected" : "not open"),
+    m.streamerbot === null ? "" : pill("Streamer.bot", m.streamerbot ? "ok" : "bad", m.streamerbot ? "connected" : "offline"),
+    m.streamerbot ? pill("Actions", m.actions.length ? "ok" : "bad", m.actions.length ? esc(m.actions.join(", ")) : "none in group") : "",
+    m.paused ? pill("State", "bad", "paused") : "",
+    // Gary's own state, from features.status()
+    f.muted ? pill("Quiet", "bad", esc(f.muted)) : pill("Quiet", "off", "off"),
+    "away" in f ? pill("Away", f.away ? "bad" : "off", f.away ? "on a break" : "off") : "",
+    pill("Poll", f.poll ? "ok" : "off", f.poll ? "open" : "off"),
+    pill("Trivia", f.trivia ? "ok" : "off", f.trivia ? "running" : "off"),
+    pill("Prediction", f.predict ? "ok" : "off", f.predict ? "open" : "off"),
+    pill("Race", f.race ? "ok" : "off", f.race ? "running" : "off"),
+    "obs" in f ? pill("OBS", f.obs ? "ok" : "bad", f.obs ? "connected" : "not connected") : "",
+  ].join("");
+  if (m.avatar) applyAvatar(m.avatar);
+}
 function addLog(line) {
   const el = $("log"), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
   const d = document.createElement("div");
   if (line.includes(" says: ")) d.className = "say";
-  d.innerHTML = esc(line);
+  d.textContent = line;
   el.appendChild(d);
   while (el.childNodes.length > 400) el.removeChild(el.firstChild);
   if (stick) el.scrollTop = el.scrollHeight;
 }
+let build = 0;   // the app's stamp of the page files: a different one after a restart means this page is old, so reload
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => send({ type: "hello", role: "control" });
+  ws.onopen = () => {
+    // the server resends the log backlog on every hello, so start empty to avoid duplicate lines
+    $("log").innerHTML = "";
+    send({ type: "hello", role: "control" });
+  };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === "log") addLog(m.line);
-    if (m.type === "status") {
-      $("pause").textContent = m.paused ? "Resume" : "Pause";
-      $("status").innerHTML =
-        pill("LM Studio", m.lm.startsWith("LM Studio OK"), esc(m.lm.replace("LM Studio OK, using model: ", ""))) +
-        pill("Overlay", m.overlays > 0, m.overlays > 0 ? "connected" : "not open") +
-        (m.streamerbot === null ? "" : pill("Streamer.bot", m.streamerbot, m.streamerbot ? "connected" : "offline")) +
-        (m.streamerbot ? pill("Actions", m.actions.length > 0, m.actions.length ? esc(m.actions.join(", ")) : "none in group") : "") +
-        (m.paused ? pill("State", false, "paused") : "");
-    }
-    if (m.type === "status" && m.avatar) applyAvatar(m.avatar);
-    if (m.type === "avatar" && m.set) applyAvatar(m.set);
+    if (m.type === "status") { if (m.build) { if (build && m.build !== build) { location.reload(); return; } build = m.build; } renderStatus(m); }
   };
-  ws.onclose = () => setTimeout(connect, 2000);
+  ws.onclose = () => {
+    $("status").innerHTML = pill("Sidekick", "bad", "not connected, retrying");
+    setTimeout(connect, 2000);
+  };
 }
 connect();
 </script>

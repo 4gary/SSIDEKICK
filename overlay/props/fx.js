@@ -6,62 +6,23 @@
 //   buildBanner(THREE, ctx)       origin = banner centre. Also setText(str, color).
 //   buildFlag(THREE, ctx)         origin = grip on the pole.
 // Scene prop:
-//   buildDisco(THREE, ctx)        origin = chain attach point, ball hangs below it.
+//   buildDisco(THREE, ctx)        in disco.js, re-exported here: origin = chain attach point, ball hangs below it.
 // World-space emitters (floor at y 0, camera at +z, screen about 6 units tall). Each returns
 //   { root, update(dt, t), alive(), dispose(), <spawn methods> }. All particles live in fixed pools.
 //   makeConfetti, makeCoins, makeFireworks, makeShockwave, makeHearts
 // Preview wrappers (fire one burst on the first update, for _pshot): previewConfetti, previewCoins,
 //   previewFireworks, previewShockwave, previewHearts.
 
+import { clamp, disposeTree, num, rbox, rnd, rr, stepOf } from './common.js';
+
 const TAU = Math.PI * 2;
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
-const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
-const stepOf = (dt) => clamp(num(dt, 1 / 60), 0, 0.1);
 const FONT = (px) => `bold ${px}px "Segoe UI", sans-serif`;
 const vec3 = (p) =>
   Array.isArray(p) ? [num(p[0], 0), num(p[1], 0), num(p[2], 0)] : [num(p && p.x, 0), num(p && p.y, 0), num(p && p.z, 0)];
 
-// Rounded box: a BoxGeometry whose vertices are pulled onto a rounded shape (radius r). Same as couch.js.
-function rbox(THREE, w, h, d, r, seg = 12, bottomOrigin = false) {
-  const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
-  const hx = w / 2, hy = h / 2, hz = d / 2;
-  const rr = Math.min(r, hx, hy, hz);
-  const ax = hx - rr, ay = hy - rr, az = hz - rr;
-  const P = g.attributes.position, N = g.attributes.normal;
-  const n = new THREE.Vector3();
-  for (let i = 0; i < P.count; i++) {
-    const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
-    const qx = clamp(x, -ax, ax), qy = clamp(y, -ay, ay), qz = clamp(z, -az, az);
-    n.set(x - qx, y - qy, z - qz).normalize();
-    P.setXYZ(i, qx + n.x * rr, qy + n.y * rr, qz + n.z * rr);
-    N.setXYZ(i, n.x, n.y, n.z);
-  }
-  P.needsUpdate = true; N.needsUpdate = true;
-  if (bottomOrigin) g.translate(0, hy, 0);
-  return g;
-}
-
-// Dispose everything under obj. `keep` is a shared geometry (ctx.sphere) that must not be freed.
-function disposeTree(obj, keep) {
-  obj.traverse((o) => {
-    if (o.geometry && o.geometry !== keep) o.geometry.dispose();
-    if (o.material) {
-      for (const m of [].concat(o.material)) {
-        if (m.map) m.map.dispose();
-        m.dispose();
-      }
-    }
-  });
-}
-
-// Canvas rounded-rectangle path
-function rr(g, x, y, w, h, r) {
-  g.beginPath(); g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
-}
+// Limits the GPU upload of an instanced attribute to its first n instances; the rest of the pool is not in use.
+function useRange(attr, n) { attr.clearUpdateRanges(); attr.addUpdateRange(0, n * attr.itemSize); attr.needsUpdate = true; }
 
 // Soft white radial glow (used as an additive sprite map)
 function glowDraw(g, w, h) {
@@ -349,8 +310,7 @@ export function buildBanner(THREE, ctx) {
   const bob = group(root, [0, 0, 0]);   // gentle float
   const unf = group(bob, [0, 0, 0]);    // unfurl (scale x)
 
-  const tex = canvasTex(CW, CH, (g, w, h) => drawRibbon(g, w, h, 'NEW SUB: NAME!', DEFAULT_COLOR));
-  const tctx = tex.userData.ctx;
+  let tex = canvasTex(CW, CH, (g, w, h) => drawRibbon(g, w, h, 'NEW SUB: NAME!', DEFAULT_COLOR));
   const geo = new THREE.PlaneGeometry(W, H, 44, 8);
   const base = Float32Array.from(geo.attributes.position.array);
   const P = geo.attributes.position;
@@ -371,8 +331,10 @@ export function buildBanner(THREE, ctx) {
   return {
     root,
     setText(str, c) {
-      drawRibbon(tctx, CW, CH, String(str == null ? '' : str), c || DEFAULT_COLOR);
-      tex.needsUpdate = true;
+      const old = tex;
+      tex = canvasTex(CW, CH, (g, w, h) => drawRibbon(g, w, h, String(str == null ? '' : str), c || DEFAULT_COLOR));
+      mat.map = tex;
+      old.dispose();                     // the previous banner's canvas texture is no longer drawn
     },
     update(dt, t, st) {
       const s = st || {};
@@ -445,96 +407,7 @@ export function buildFlag(THREE, ctx) {
   };
 }
 
-// =====================================================================================
-// Disco ball
-// A faceted mirror ball (radius 0.35) on a short chain. Origin = the chain attach point, so the ball
-// hangs 0.65 below it. Five coloured spotlight beams (additive cones) sweep around below the ball.
-// st.on (0..1, default 1) fades the ball, chain, beams and the small glow light.
-// =====================================================================================
-export function buildDisco(THREE, ctx) {
-  const { mesh, group } = ctx;
-  const root = new THREE.Group();
-  const R = 0.35, CHAIN = 0.3;
-
-  const chainM = new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.7, roughness: 0.3, transparent: true });
-  const links = [];
-  for (let i = 0; i < 5; i++) {
-    const link = mesh(new THREE.TorusGeometry(0.035, 0.01, 8, 14), chainM, root, [0, -0.03 - i * 0.06, 0]);
-    link.rotation.y = i % 2 ? Math.PI / 2 : 0;
-    links.push(link);
-  }
-
-  // Faceted ball: flat-shaded icosphere with a random mirror tint per facet
-  const ballGeo = new THREE.IcosahedronGeometry(R, 2); // PolyhedronGeometry is already non-indexed
-  const tris = ballGeo.attributes.position.count / 3;
-  const col = new Float32Array(tris * 9);
-  for (let f = 0; f < tris; f++) {
-    const roll = Math.random();
-    let r, gg, b;
-    if (roll < 0.12) { r = 1.0; gg = 0.55; b = 0.85; }
-    else if (roll < 0.2) { r = 0.6; gg = 0.95; b = 1.0; }
-    else { const v = rnd(0.7, 1.0); r = v; gg = v; b = v; }
-    for (let k = 0; k < 3; k++) {
-      const o = f * 9 + k * 3;
-      col[o] = r; col[o + 1] = gg; col[o + 2] = b;
-    }
-  }
-  ballGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const ballM = new THREE.MeshStandardMaterial({
-    vertexColors: true, flatShading: true, metalness: 0.45, roughness: 0.2,
-    emissive: 0x222233, emissiveIntensity: 0.5, transparent: true,
-  });
-  const ball = mesh(ballGeo, ballM, root, [0, -CHAIN - R, 0]);
-
-  // One small point light for the glow on the room (the only light in this module)
-  const glow = new THREE.PointLight(0xffffff, 1, 3, 2);
-  glow.position.set(0, -CHAIN - R, 0.3);
-  root.add(glow);
-
-  // Beams: each beam is a cone apex-at-the-ball, tilted outward; the yaw group sweeps it around
-  const beamsG = group(root, [0, -CHAIN - R, 0]);
-  const beamGeo = new THREE.ConeGeometry(1, 1, 24, 1, true);
-  beamGeo.translate(0, -0.5, 0); // apex at the origin, base 1 unit below
-  const COLS = [0xff4fd8, 0x35e0ff, 0xffe14d, 0x7dff6a, 0xff8a3d];
-  const beams = [];
-  for (let i = 0; i < 5; i++) {
-    const yaw = group(beamsG, [0, 0, 0]);
-    const tilt = group(yaw, [0, 0, 0]);
-    tilt.rotation.z = 0.4 + (i % 3) * 0.14;
-    const m = new THREE.MeshBasicMaterial({
-      color: COLS[i], transparent: true, opacity: 0.15, blending: THREE.AdditiveBlending,
-      depthWrite: false, side: THREE.DoubleSide,
-    });
-    mesh(beamGeo, m, tilt, [0, 0, 0], [0.42, 1.8, 0.42]);
-    beams.push({ yaw, m, ph: i * 1.26, sp: (i % 2 ? -1 : 1) * (0.5 + i * 0.07) });
-  }
-
-  let spin = 0;
-  return {
-    root,
-    update(dt, t, st) {
-      const h = stepOf(dt);
-      const s = st || {};
-      const on = clamp(num(s.on, 1), 0, 1);
-      const time = num(t, 0);
-      spin += h * 0.9;
-      ball.rotation.set(0.15, spin, 0);
-      ballM.opacity = on;
-      chainM.opacity = on;
-      ball.visible = on > 0.005;
-      for (const l of links) l.visible = on > 0.005;
-      beamsG.visible = on > 0.005;
-      for (const b of beams) {
-        b.yaw.rotation.y = time * b.sp + b.ph;
-        b.m.opacity = 0.15 * on;
-      }
-      glow.intensity = 1.2 * on;
-    },
-    dispose() {
-      disposeTree(root);
-    },
-  };
-}
+export { buildDisco } from './disco.js';
 
 // =====================================================================================
 // Confetti emitter
@@ -556,10 +429,11 @@ export function makeConfetti(THREE, ctx) {
 
   const parts = [];
   for (let i = 0; i < MAX; i++) {
-    parts.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, sx: 0, sy: 0, sz: 0,
+    parts.push({ on: false, zero: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, sx: 0, sy: 0, sz: 0,
       k: 3, sw: 1, ph: 0, amp: 0.5, age: 0, land: -1, stay: 1, s: 1 });
   }
   const E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(), M4 = new THREE.Matrix4();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0);
   let cursor = 0, hi = 0, live = 0, dirty = false;
 
   function kill(p) { if (p.on) { p.on = false; live--; } }
@@ -626,15 +500,20 @@ export function makeConfetti(THREE, ctx) {
         }
         if (p.age > 7 || (p.land >= 0 && p.s <= 0)) kill(p);
       }
-      const sc = p.on ? p.s : 0;
+      if (!p.on) {                       // dead: write its zero matrix once, then skip it
+        if (!p.zero) { p.zero = true; im.setMatrixAt(i, ZERO4); }
+        continue;
+      }
+      p.zero = false;
       E.set(p.rx, p.ry, p.rz, 'YXZ'); Q.setFromEuler(E);
-      V.set(p.x, p.y, p.z); S.set(sc, sc, sc);
+      V.set(p.x, p.y, p.z); S.set(p.s, p.s, p.s);
       M4.compose(V, Q, S);
       im.setMatrixAt(i, M4);
     }
+    while (hi > 0 && !parts[hi - 1].on) hi--;   // the high-water mark follows the highest live slot
     im.count = hi;
-    im.instanceMatrix.needsUpdate = true;
-    if (dirty && im.instanceColor) { im.instanceColor.needsUpdate = true; dirty = false; }
+    useRange(im.instanceMatrix, hi);
+    if (dirty && im.instanceColor) { useRange(im.instanceColor, hi); dirty = false; }
   }
 
   return {
@@ -689,13 +568,15 @@ export function makeCoins(THREE, ctx) {
     return im;
   };
   const bodyIM = mk(bodyGeo, bodyM), faceIM = mk(faceGeo, faceM), backIM = mk(backGeo, backM);
+  const ims = [bodyIM, faceIM, backIM];
 
   const parts = [];
   for (let i = 0; i < MAX; i++) {
-    parts.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, sy: 0, bounced: false, landed: false, land: 0, age: 0, stay: 0.8, s: 1 });
+    parts.push({ on: false, zero: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, sy: 0, bounced: false, landed: false, land: 0, age: 0, stay: 0.8, s: 1 });
   }
   const E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3();
   const M4 = new THREE.Matrix4(), T4 = new THREE.Matrix4(), F4 = new THREE.Matrix4(), B4 = new THREE.Matrix4();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0);
   let cursor = 0, hi = 0, live = 0;
 
   function kill(p) { if (p.on) { p.on = false; live--; } }
@@ -712,12 +593,14 @@ export function makeCoins(THREE, ctx) {
   }
 
   function rain(x = 0, width = 6, n = 40) {
+    n = Math.min(n, MAX);   // requests above the pool size would wrap and overwrite live coins
     for (let i = 0; i < n; i++) {
       spawn(x + rnd(-width / 2, width / 2), rnd(5.6, 6.6), rnd(-0.2, 0.2), rnd(-0.3, 0.3), -rnd(0.5, 1.5), rnd(-0.2, 0.2));
     }
   }
 
   function fountain(pos = [0, 0, 0], n = 40) {
+    n = Math.min(n, MAX);
     const [x, y, z] = vec3(pos);
     for (let i = 0; i < n; i++) {
       const a = rnd(-0.6, 0.6);
@@ -759,18 +642,20 @@ export function makeCoins(THREE, ctx) {
         }
         if (p.age > 8 || (p.landed && p.s <= 0)) kill(p);
       }
-      const sc = p.on ? p.s : 0;
+      if (!p.on) {                       // dead: zero all three matrices once, then skip it
+        if (!p.zero) { p.zero = true; bodyIM.setMatrixAt(i, ZERO4); faceIM.setMatrixAt(i, ZERO4); backIM.setMatrixAt(i, ZERO4); }
+        continue;
+      }
+      p.zero = false;
       E.set(p.rx, p.ry, 0, 'YXZ'); Q.setFromEuler(E);
-      V.set(p.x, p.y, p.z); S.set(sc, sc, sc);
+      V.set(p.x, p.y, p.z); S.set(p.s, p.s, p.s);
       M4.compose(V, Q, S);
       bodyIM.setMatrixAt(i, M4);
       T4.makeTranslation(0, 0, OFF); F4.multiplyMatrices(M4, T4); faceIM.setMatrixAt(i, F4);
       T4.makeTranslation(0, 0, -OFF); B4.multiplyMatrices(M4, T4); backIM.setMatrixAt(i, B4);
     }
-    for (const im of [bodyIM, faceIM, backIM]) {
-      im.count = hi;
-      im.instanceMatrix.needsUpdate = true;
-    }
+    while (hi > 0 && !parts[hi - 1].on) hi--;
+    for (const im of ims) { im.count = hi; useRange(im.instanceMatrix, hi); }
   }
 
   return {
@@ -842,12 +727,13 @@ export function makeFireworks(THREE, ctx) {
 
   const parts = [];
   for (let i = 0; i < MAX; i++) {
-    parts.push({ on: false, kind: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 1, size: 0.2,
+    parts.push({ on: false, zero: false, kind: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 1, size: 0.2,
       drag: 1, grav: 0, tgt: 0, emit: 0, col: WHITE, tcol: WHITE, boost: 1.3 });
   }
   const pending = [];
   const idQ = new THREE.Quaternion();
   const V = new THREE.Vector3(), S = new THREE.Vector3(), M4 = new THREE.Matrix4(), C = new THREE.Color();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0), BLACK = new THREE.Color(0, 0, 0);
   let cursor = 0, hi = 0, live = 0;
 
   function kill(p) { if (p.on) { p.on = false; live--; } }
@@ -917,23 +803,23 @@ export function makeFireworks(THREE, ctx) {
           }
         }
       }
-      let sc = 0, f = 0;
-      if (p.on) {
-        const u = p.kind === 1 ? 0 : Math.min(1, p.age / p.life);
-        f = (1 - u) * (1 - u);
-        sc = p.size * (0.5 + 0.5 * (1 - u));
-        C.copy(p.col).multiplyScalar(f * p.boost);
-      } else {
-        C.setRGB(0, 0, 0);
+      if (!p.on) {                       // dead: zero matrix and black colour written once, then skipped
+        if (!p.zero) { p.zero = true; im.setMatrixAt(i, ZERO4); im.setColorAt(i, BLACK); }
+        continue;
       }
+      p.zero = false;
+      const u = p.kind === 1 ? 0 : Math.min(1, p.age / p.life);
+      const f = (1 - u) * (1 - u), sc = p.size * (0.5 + 0.5 * (1 - u));
+      C.copy(p.col).multiplyScalar(f * p.boost);
       V.set(p.x, p.y, p.z); S.set(sc, sc, sc);
       M4.compose(V, idQ, S);
       im.setMatrixAt(i, M4);
       im.setColorAt(i, C);
     }
+    while (hi > 0 && !parts[hi - 1].on) hi--;
     im.count = hi;
-    im.instanceMatrix.needsUpdate = true;
-    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    useRange(im.instanceMatrix, hi);
+    if (im.instanceColor) useRange(im.instanceColor, hi);
   }
 
   return {
@@ -1071,11 +957,12 @@ export function makeHearts(THREE, ctx) {
     root.add(im);
     const parts = [];
     for (let i = 0; i < MAX; i++) {
-      parts.push({ on: false, x0: 0, y0: 0, z0: 0, vx: 0, vy: 0, age: 0, life: 1, size: 0.3, amp: 0.2, freq: 2, ph: 0 });
+      parts.push({ on: false, zero: false, x0: 0, y0: 0, z0: 0, vx: 0, vy: 0, age: 0, life: 1, size: 0.3, amp: 0.2, freq: 2, ph: 0 });
     }
     K[name] = { im, mat, tex, parts, cursor: 0, hi: 0 };
   }
   const E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(), M4 = new THREE.Matrix4();
+  const ZERO4 = new THREE.Matrix4().makeScale(0, 0, 0);
 
   function spawn(name, x, y, z) {
     const k = K[name];
@@ -1104,31 +991,33 @@ export function makeHearts(THREE, ctx) {
       const k = K[name];
       for (let i = 0; i < k.hi; i++) {
         const p = k.parts[i];
-        let X = 0, Y = 0, Z = 0, sc = 0, rz = 0;
         if (p.on) {
           p.age += h;
           if (p.age >= p.life) { p.on = false; live--; }
         }
-        if (p.on) {
-          const u = p.age / p.life;
-          let env;
-          if (u < 0.12) env = (u / 0.12) * 1.15;
-          else if (u < 0.2) env = 1.15 - 0.15 * ((u - 0.12) / 0.08);
-          else if (u < 0.7) env = 1;
-          else env = Math.max(0, (1 - u) / 0.3);
-          sc = p.size * env;
-          X = p.x0 + p.vx * p.age + Math.sin(p.age * p.freq + p.ph) * p.amp;
-          Y = p.y0 + p.vy * p.age;
-          Z = p.z0;
-          rz = Math.sin(p.age * 1.6 + p.ph) * 0.3;
+        if (!p.on) {                     // dead: zero matrix written once, then skipped
+          if (!p.zero) { p.zero = true; k.im.setMatrixAt(i, ZERO4); }
+          continue;
         }
+        p.zero = false;
+        const u = p.age / p.life;
+        let env;
+        if (u < 0.12) env = (u / 0.12) * 1.15;
+        else if (u < 0.2) env = 1.15 - 0.15 * ((u - 0.12) / 0.08);
+        else if (u < 0.7) env = 1;
+        else env = Math.max(0, (1 - u) / 0.3);
+        const sc = p.size * env;
+        const X = p.x0 + p.vx * p.age + Math.sin(p.age * p.freq + p.ph) * p.amp;
+        const Y = p.y0 + p.vy * p.age, Z = p.z0;
+        const rz = Math.sin(p.age * 1.6 + p.ph) * 0.3;
         E.set(0, 0, rz); Q.setFromEuler(E);
         V.set(X, Y, Z); S.set(sc, sc, sc);
         M4.compose(V, Q, S);
         k.im.setMatrixAt(i, M4);
       }
+      while (k.hi > 0 && !k.parts[k.hi - 1].on) k.hi--;
       k.im.count = k.hi;
-      k.im.instanceMatrix.needsUpdate = true;
+      useRange(k.im.instanceMatrix, k.hi);
     }
   }
 

@@ -2,11 +2,10 @@
 // front faces +z (the camera). Gary's use spot is beside the pot on its -x side, facing it (yaw PI/2, side-on).
 // Stem segments, leaves, a bud and a flower are all built up front and scaled/revealed by st.grow.
 
+import { clamp, lerp, smooth } from './common.js';
+
 export function build(THREE, ctx) {
   const { mesh, group, canvasTex, sphere } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   const easeOutBack = (t) => { const c1 = 1.70158, c3 = c1 + 1, u = t - 1; return 1 + c3 * u * u * u + c1 * u * u; };
 
   const SOIL_Y = 0.31;                 // soil surface (pot cavity floor), prop units
@@ -167,7 +166,6 @@ export function build(THREE, ctx) {
 // droplets are simulated in the can's local space (gravity along its -y).
 export function buildWateringCan(THREE, ctx) {
   const { mesh, group, canvasTex, sphere } = ctx;
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const root = new THREE.Group();
   const own = [];
   const geo = (g) => { own.push(g); return g; };
