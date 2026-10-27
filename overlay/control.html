@@ -144,7 +144,7 @@ document.querySelectorAll("button.mode").forEach(b => b.onclick = () => { send({
 $("home").onchange = () => send({ type: "avatar", set: { home: { x: Number($("home").value) } } });
 $("size").oninput = () => { $("sizeVal").textContent = Number($("size").value).toFixed(1) + "×"; };
 $("size").onchange = () => send({ type: "avatar", set: { size: Number($("size").value) } });
-const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose, flick it"], ["armpit", "Sniff armpit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Chase a butterfly"],
+const ACTS = [["buttscratch", "Butt scratch"], ["sneeze", "Sneeze"], ["nosepick", "Pick nose, flick it"], ["armpit", "Sniff armpit"], ["airguitar", "Air guitar"], ["airdrums", "Air drums"], ["dance", "Dance"], ["butterfly", "Chase a butterfly"], ["daydream", "Daydream (silent thought bubble)"],
   ["yawn", "Big yawn"], ["knuckles", "Crack knuckles"], ["watch", "Check his watch"], ["shoe", "Tie his shoe"], ["whistle", "Whistle a tune"], ["mutter", "Mutter to himself"], ["embarrassed", "Get embarrassed"], ["mictest", "Mic check"],
   ["stare", "Stare at the viewer"], ["phone", "Texting on his phone"], ["lieback", "Lie on his back"], ["dj", "DJ set"], ["couch", "Chill on the couch"], ["nap", "Nap in bed"], ["arcade", "Play arcade"], ["desk", "Sit at his desk"], ["desknap", "Doze off at the desk"],
   ["floorsit", "Sit on the floor"], ["snack", "Eat a snack"], ["read", "Read a book or paper"], ["ball", "Juggle a ball"], ["fishing", "Go fishing"], ["exercise", "Work out"], ["punch", "Punching bag"], ["yoga", "Yoga"], ["beer", "Drink a beer"], ["plant", "Water his plant"], ["paint", "Paint a picture"],

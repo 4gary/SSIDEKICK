@@ -618,6 +618,19 @@ const dotsMat = new THREE.MeshStandardMaterial({ color: 0x333348, transparent: t
 const tDots = [-0.12, 0, 0.12].map(x => mesh(sphere, dotsMat, thought, [x, 0.03, 0.14], [0.035, 0.035, 0.035]));
 thought.traverse(o => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; } });
 thought.visible = false;
+// daydreams: now and then, while idle, the bubble pops up with a little picture in it and he says nothing about it
+const DREAMS = ["🍕", "🍔", "🌭", "🌮", "🍩", "🍺", "🐱", "🐶", "🦖", "💰", "🏆", "❤️", "🎮", "⚽", "🚀", "🛸", "👽", "🏝️", "🎲", "🔮", "💤", "🤔", "🎸", "🏎️", "🐟"];
+const dreamTex = DREAMS.map(e => canvasTex(128, 128, g => { g.font = "92px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(e, 64, 70); }));
+const dreamSp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dreamTex[0], transparent: true, depthWrite: false, opacity: 0 }));
+dreamSp.position.set(0, 0.03, 0.16); dreamSp.scale.setScalar(0.4); dreamSp.frustumCulled = false; thought.add(dreamSp);
+const dream = { k: 0, on: false, until: 0, next: 25 };
+function startDream(force = false) {
+  if (!force && settings.acts.on.daydream === false) return false;
+  dreamSp.material.map = dreamTex[Math.floor(Math.random() * dreamTex.length)]; dreamSp.material.needsUpdate = true;
+  dream.on = true; dream.until = S.t + rand(4, 6);
+  if (force && !job) { nav.tx = nav.x; nav.tz = nav.z; nav.holdUntil = dream.until; nav.nextDecision = Math.max(nav.nextDecision, dream.until + 1); }   // a clicked daydream: he stops to have it
+  return true;
+}
 
 // smoke particles from the ember
 const smoke = [];
@@ -883,7 +896,7 @@ function applySettings(set = {}) {
 let queuedDo = null;
 function doClicked(name, info = {}) {
   const ev = name === "stop" || name === "redeem" || JOBS[name]?.event;
-  if (ev || !(BITS[name] || JOBS[name])) { queuedDo = null; return doActivity(name, info); }
+  if (ev || !(BITS[name] || JOBS[name] || name === "daydream")) { queuedDo = null; return doActivity(name, info); }
   const off = currentMode() === "walkon" && nav.offscreen;
   if (!(talking || thinking || Math.max(S.talk, S.think) > 0.05) && !off && !(job && job.phase !== "go")) {
     queuedDo = null;
@@ -914,6 +927,7 @@ function doActivity(name, info = {}) {
     else { head.getWorldPosition(V1); for (let i = 0; i < 5; i++) floater(V1.clone().add(V2.set(rand(-0.8, 0.8), 0.6, 0).multiplyScalar(settings.size)), starTex, V3.set(0, 0.35, 0).multiplyScalar(settings.size)); startGesture(["dance", "airguitar", "sneeze", "yawn"][Math.floor(Math.random() * 4)]); }
     return;
   }
+  if (name === "daydream") { startDream(true); return; }
   if (name === "embarrassed" && (job || act.name)) return "skipped: busy";   // only when he is free
   if (JOBS[name]?.event) { if (settings.acts.on[name] === false) return "skipped: turned off on the control page"; pendingInfo = info || {}; }
   if (BITS[name]) { if (job) job = null; nav.tx = nav.x; nav.tz = nav.z; nav.nextDecision = S.t + BITS[name] + 2; nav.holdUntil = S.t + BITS[name]; if (currentMode() === "walkon") nav.lingerUntil = Math.max(nav.lingerUntil || 0, S.t + BITS[name] + 3); startGesture(name); }
@@ -969,7 +983,8 @@ const debug = {
   setYaw: y => { nav.fixedYaw = (typeof y === "number") ? y : null; },
   setMode: m => applySettings({ mode: m }),
   gesture: name => startGesture(name),
-  doActivity: name => doActivity(name), doClicked: name => doClicked(name), get queued() { return queuedDo && queuedDo.name; }, endJob: () => endJob(), get job() { return job && { name: job.name, phase: job.phase, w: +job.w.toFixed(2) }; }, get props() { return Object.keys(PROPS); },
+  get run() { return +(nav.run || 0).toFixed(2); }, propAt: k => PROPS[k] && PROPS[k].inst.root.position.toArray().map(v => +v.toFixed(2)), xMax: () => +xMaxAt(nav.z, settings.size).toFixed(2),
+  get dream() { return { on: dream.on, k: +dream.k.toFixed(2) }; }, doActivity: name => doActivity(name), doClicked: name => doClicked(name), get queued() { return queuedDo && queuedDo.name; }, endJob: () => endJob(), get job() { return job && { name: job.name, phase: job.phase, w: +job.w.toFixed(2) }; }, get props() { return Object.keys(PROPS); },
   debugAct: () => ({ act: act.name, t: +S.t.toFixed(2), t0: act.t0, w: +J.w.toFixed(2), wP: +J.wP.toFixed(2), moving: +nav.moving.toFixed(2), busy: +Math.max(S.talk, S.think).toFixed(2) }),
   screenPos: () => { const v = byte.position.clone(); v.y += 1.2 * settings.size; v.project(camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; },
   teleport: (x, z) => { nav.x = x; nav.z = z; },
@@ -1172,7 +1187,7 @@ const JOBS = {
 };
 const JOBS3 = new Set(["floorsit", "snack", "read", "ball", "fishing", "exercise", "punch", "yoga", "beer", "plant", "paint", "sign", "marble", "goodbye", "raid", "sub", "bits", "follow", "hype", "rip"]);
 const ACT_NAMES = [...Object.keys(BITS), ...Object.keys(JOBS)];
-settings.acts = { on: Object.fromEntries(ACT_NAMES.map(n => [n, true])), gap: 1, props: "use", scene: "normal", sfx: true };
+settings.acts = { on: Object.fromEntries([...ACT_NAMES, "daydream"].map(n => [n, true])), gap: 1, props: "use", scene: "normal", sfx: true };
 
 // props live in overlay/props/*.js and pop in when he goes to use them. Slots: fx = fraction of the screen half-width, fz = 0 far .. 1 near.
 const PROP_SLOTS = {
@@ -1201,8 +1216,15 @@ for (const name of Object.keys(PROP_SLOTS)) {
     }
   }).catch(e => console.warn(`prop ${name} not loaded:`, e));
 }
-function placeProp(p) {
-  const size = settings.size, s = p.slot;
+// Each time a prop pops in it gets a new random spot (either side, any depth), turned toward the middle and clear of the other
+// props that are out. A re-layout (new size or frame) keeps the spot it has. PROP_SLOTS only gives its size and how far it turns.
+function propSpot(p) {
+  const s = p.slot;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  return { fx: side * rand(0.3, 0.95), fz: rand(0, 0.6), yaw: -side * Math.abs(s.yaw) * rand(0.6, 1.3), half: s.half };
+}
+function setPropAt(p, s) {
+  const size = settings.size;
   const z = lerp(stage.zFar, stage.zNear, s.fz);
   const xm = xMaxAt(z, size);
   const x = Math.sign(s.fx) * Math.max(0, Math.abs(s.fx) * xm - s.half * size);
@@ -1211,6 +1233,19 @@ function placeProp(p) {
   p.inst.root.scale.setScalar(size);
   p.inst.root.updateMatrixWorld(true);
   p.foot = new THREE.Box3().setFromObject(p.inst.root).expandByScalar(0.3);   // footprint for the walk (cached until the prop is placed again)
+}
+function placeProp(p) {
+  const fresh = !p.shown && (!p.spot || S.t - p.spotAt > 1);        // a job places it just before it pops in: that is the same placement
+  if (!fresh) { setPropAt(p, p.spot); return; }
+  const others = Object.values(PROPS).filter(o => o !== p && o.foot && (o.shown || S.t - (o.spotAt ?? -9) < 1));
+  let best = null;
+  for (let i = 0; i < 14; i++) {
+    const spot = i < 13 ? propSpot(p) : p.slot;                     // the old fixed slot is the last resort
+    setPropAt(p, spot);
+    if (!others.some(o => o.foot.intersectsBox(p.foot)) && !p.foot.containsPoint(V1.set(nav.x, 0.5, nav.z))) { best = spot; break; }
+  }
+  p.spot = best || p.slot; p.spotAt = S.t;
+  setPropAt(p, p.spot);
 }
 // walks avoid shown props: random targets and walk midpoints are re-drawn when they land inside a footprint
 function propBlocked(x, z) {
@@ -2539,7 +2574,8 @@ function update(dt) {
     speed = 0.5 * size;
     if (want) { nav.tx = clamp(nav.x, homeX - 0.5, homeX + 0.5); nav.tz = clamp(nav.z, homeZ - 0.4, homeZ + 0.4); }
     else if (t > nav.nextDecision) {
-      [nav.tx, nav.tz] = freeTarget(() => [clamp(homeX + rand(-0.9, 0.9) * size, -xm, xm), clamp(homeZ + rand(-0.6, 0.6) * size, stage.zFar, stage.zNear)]);
+      const wr = 0.9 * size + (1 - Math.min(1, size)) * 0.6 * xm;  // a smaller Gary wanders a wider stretch of the screen, not just his own few steps
+      [nav.tx, nav.tz] = freeTarget(() => [clamp(homeX + rand(-1, 1) * wr, -xm, xm), clamp(homeZ + rand(-0.6, 0.6) * Math.max(size, 0.8), stage.zFar, stage.zNear)]);
       nav.nextDecision = t + rand(4, 10);
     }
   } else if (mode === "roam") {
@@ -2557,7 +2593,9 @@ function update(dt) {
         nav.tx = side * rand(0.2, 0.8) * Math.max(0, xMaxAt(nav.z, size) - margin); nav.tz = nav.z;
         nav.nextDecision = t + rand(4, 9);
       } else {
-        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear); return [rand(-1, 1) * Math.max(0, xMaxAt(z, size) - margin), z]; });
+        // the smaller he is, the more often he heads right out to an edge of the screen (at size 1 about 1 trip in 6, at 0.5 about 1 in 2)
+        const edgy = clamp(0.15 + (1 - size) * 0.7, 0.1, 0.65);
+        [nav.tx, nav.tz] = freeTarget(() => { const z = rand(stage.zFar, stage.zNear), xz = Math.max(0, xMaxAt(z, size) - margin * (size < 1 ? 0.6 : 1)); return [(Math.random() < edgy ? (Math.random() < 0.5 ? -1 : 1) * rand(0.82, 1) : rand(-1, 1)) * xz, z]; });
         nav.nextDecision = t + rand(3, 9);
       }
     }
@@ -2572,7 +2610,7 @@ function update(dt) {
   if (!stage.wide) { nav.tx = clamp(nav.tx, -xm, xm); nav.tz = clamp(nav.tz, stage.zFar, stage.zNear); }
 
   if (scene_().front && !job) nav.tz = Math.max(nav.tz, lerp(stage.zFar, stage.zNear, 0.65));   // chatting: hangs near the camera
-  if (act.name && BITS[act.name] && t < (nav.holdUntil || 0)) { nav.tx = nav.x; nav.tz = nav.z; }   // a bit plays where he stands, even in stay mode away from home
+  if (((act.name && BITS[act.name]) || dream.on) && t < (nav.holdUntil || 0)) { nav.tx = nav.x; nav.tz = nav.z; }   // a bit plays where he stands, even in stay mode away from home
   const jn = jobUpdate(t, dt, want, mode, size);               // an activity steers him to its spot
   if (jn) { nav.tx = jn.x; nav.tz = jn.z; speed = jn.speed; }
   if (scene_().slow && !(job && job.def.event)) speed *= scene_().slow;
@@ -2580,6 +2618,13 @@ function update(dt) {
   // ---- walk toward the target
   const dx = nav.tx - nav.x, dz = nav.tz - nav.z, dist = Math.hypot(dx, dz);
   const moving = dist > 0.04 ? 1 : 0;
+  // running: when the target jumps somewhere far he sometimes jogs there, and he always runs when in a hurry (dashing on screen to talk)
+  if (Math.hypot(nav.tx - (nav.prevTx ?? nav.tx), nav.tz - (nav.prevTz ?? nav.tz)) > 0.5 * size)
+    nav.runTrip = !(jn && jn.backward) && !(job && (job.phase === "do" || job.name === "stare")) && (speed >= 1.3 * size || (dist > 2.6 * size && Math.random() < 0.4));
+  nav.prevTx = nav.tx; nav.prevTz = nav.tz;
+  if (nav.runTrip && (dist < 0.6 * size || (job && job.phase === "do"))) nav.runTrip = false;
+  nav.run = smooth(nav.run || 0, nav.runTrip && moving ? 1 : 0, 4, dt);
+  speed *= 1 + 1.1 * nav.run;
   nav.moving = smooth(nav.moving, moving, 7, dt);
   nav.speed = smooth(nav.speed, speed, 4, dt);
   if (moving) {
@@ -2598,6 +2643,10 @@ function update(dt) {
 
   // ---- one-off actions while idle: drag on the cigarette, scratch, fix the cap, stretch
   runQueuedDo(want, busy);
+  const dreamFree = busy < 0.05 && !moving && !act.name && !(job && (job.phase !== "do" || job.def.event));
+  if (!dream.on && dreamFree && t > dream.next) { startDream(); dream.next = t + rand(30, 75) * actGap(); }
+  if (dream.on && (t > dream.until || busy > 0.05 || moving)) { dream.on = false; dream.next = Math.max(dream.next, t + 20); }
+  dream.k = smooth(dream.k, dream.on ? 1 : 0, dream.on ? 5 : 7, dt);
   if (busy < 0.05 && !moving && !act.name && !job && !queuedDo && t > nextIdleAct) {
     const pool = ["drag", "drag", "drag", "scratch", "cap", "stretch", ...Object.keys(BITS).filter(n => settings.acts.on[n] && n !== "embarrassed")].filter(n => sceneAllows(n) || ["drag", "scratch", "cap"].includes(n));
     startGesture(pool[Math.floor(Math.random() * pool.length)]);
@@ -2729,13 +2778,13 @@ function update(dt) {
   if (J.root && J.rootW > 0.001) { byte.position.lerp(J.root, J.rootW); byte.quaternion.slerp(J.rootQ, J.rootW); }   // sitting / lying
   const vy = hopV * (S.hop > 0 ? 1 : 0);
   squash.scale.set(1 - vy * 0.05, 1 + vy * 0.08, 1 - vy * 0.05);
-  const step = Math.sin(S.walkPhase), mv = nav.moving;
+  const step = Math.sin(S.walkPhase), mv = nav.moving, run = nav.run || 0;   // run 0..1 turns the walk into a jog: longer stride, bent elbows pumping, leaning in
   if (t > nextShift && !moving) { shiftTarget = rand(-1, 1); nextShift = t + rand(6, 14); }
   const shift = (hips.userData.shift = smooth(hips.userData.shift || 0, moving ? 0 : shiftTarget, 1.5, dt));
-  hips.position.set(0.035 * shift, 0.46 + Math.abs(Math.cos(S.walkPhase)) * 0.045 * mv + Math.sin(t * 2.2) * 0.006, 0);
+  hips.position.set(0.035 * shift, 0.46 + Math.abs(Math.cos(S.walkPhase)) * (0.045 + 0.06 * run) * mv + Math.sin(t * 2.2) * 0.006, 0);
   hips.rotation.z = -0.05 * shift;
   torso.rotation.z = step * 0.06 * mv + Math.sin(t * 0.9) * 0.02 + 0.06 * shift;
-  torso.rotation.x = 0.1 * mv + 0.05 * S.talk * level + 0.12 * S.think + 0.1 * inhale + (act.name === "stretch" ? -0.15 * Math.sin(ap * Math.PI) : 0);
+  torso.rotation.x = (0.1 + 0.22 * run) * mv + 0.05 * S.talk * level + 0.12 * S.think + 0.1 * inhale + (act.name === "stretch" ? -0.15 * Math.sin(ap * Math.PI) : 0);
   torso.scale.set(1 + Math.sin(t * 2.2) * 0.012, 1 + Math.sin(t * 2.2 + 1) * 0.014, 1);   // breathing
   if (J.w > 0.001) {
     hips.position.y += J.hipsY * J.w; hips.rotation.z += J.hipsZ * J.w;
@@ -2748,8 +2797,8 @@ function update(dt) {
   for (const [lg, sgn] of [[legN, 1], [legP, -1]]) {
     const ph = S.walkPhase + (sgn > 0 ? 0 : Math.PI);
     const swing = Math.sin(ph);
-    lg.hp.rotation.x = swing * 0.55 * mv - 0.3 * (S.hop > 0 ? 1 : 0) + (shift * sgn > 0 ? 0.05 * Math.abs(shift) : 0);
-    lg.kn.rotation.x = Math.max(0, Math.cos(ph - 0.6)) * 1.0 * mv * (swing > -0.2 ? 1 : 0.2) + kneeBend + (shift * sgn > 0 ? 0.25 * Math.abs(shift) : 0);
+    lg.hp.rotation.x = swing * (0.55 + 0.4 * run) * mv - 0.3 * (S.hop > 0 ? 1 : 0) + (shift * sgn > 0 ? 0.05 * Math.abs(shift) : 0);
+    lg.kn.rotation.x = Math.max(0, Math.cos(ph - 0.6)) * (1.0 + 0.7 * run) * mv * (swing > -0.2 ? 1 : 0.2) + kneeBend + (shift * sgn > 0 ? 0.25 * Math.abs(shift) : 0);
     lg.ft.rotation.x = -lg.kn.rotation.x * 0.7 + Math.max(0, -swing) * 0.3 * mv;
   }
   [legN, legP].forEach((lg, i) => {
@@ -2762,8 +2811,8 @@ function update(dt) {
   if (t > nextGesture) { talkGesture = { n: Math.random() < 0.55 ? Math.random() : 0, p: Math.random() < 0.6 ? Math.random() : 0, k: Math.random() }; nextGesture = t + rand(0.7, 2); }
   const gN = talkGesture.n * S.talk * (0.35 + level), gP = talkGesture.p * S.talk * (0.35 + level);
   const pick = k => k < 0.4 ? "gestureOut" : k < 0.7 ? "gestureUp" : k < 0.85 ? "gesturePoint" : "shrug";
-  const walkN = eulerPose(-step * 0.65 * mv, 0, -0.12, -0.5 - 0.3 * mv);
-  const walkP = eulerPose(step * 0.65 * mv, 0, 0.12, -0.5 - 0.3 * mv);
+  const walkN = eulerPose(-step * (0.65 + 0.35 * run) * mv, 0, -0.12, -0.5 - 0.3 * mv - 0.9 * run * mv);
+  const walkP = eulerPose(step * (0.65 + 0.35 * run) * mv, 0, 0.12, -0.5 - 0.3 * mv - 0.9 * run * mv);
   let pN = blendPose(walkN, POSE[pick(talkGesture.k)](-1), clamp(gN, 0, 1));
   let pP = blendPose(walkP, POSE[pick(1 - talkGesture.k)](1), clamp(gP, 0, 1));
   if (S.think > 0.01) {
@@ -2784,6 +2833,7 @@ function update(dt) {
 
   // head, with secondary bounce on the cap, hair and mustache
   neck.rotation.set(S.nod + (act.name === "cap" ? -0.08 * Math.sin(ap * Math.PI) : 0) + 0.09 * inhale, S.headYaw - 0.1 * inhale, -S.tilt - (act.name === "cap" ? 0.22 * (act.side || 1) * Math.sin(ap * Math.PI) : 0));
+  neck.rotation.x -= 0.16 * dream.k; neck.rotation.y += 0.18 * dream.k;   // looking up at his daydream
   if (J.neckW > 0.001) { neck.rotation.x += J.neck[0] * J.neckW; neck.rotation.y += J.neck[1] * J.neckW; neck.rotation.z += J.neck[2] * J.neckW; }
   head.scale.set(1 + level * 0.012 * S.talk, 1 - level * 0.012 * S.talk, 1);
   const pitchV = (S.nod - prevHeadPitch) / Math.max(dt, 1e-3), yawV = (S.headYaw - prevHeadYaw) / Math.max(dt, 1e-3);
@@ -2810,13 +2860,16 @@ function update(dt) {
   fill.target.position.set(lx, 1, lz); fill.position.set(lx - 3, 1.5, lz + 3);
 
   // thought bubble
-  thought.visible = S.think > 0.02;
-  const ts = S.think * size;
+  const tk = Math.max(S.think, dream.k);                       // thinking up an answer (dots) or daydreaming (a picture)
+  thought.visible = tk > 0.02;
+  const ts = tk * size;
   thought.scale.setScalar(ts);
   const tb = thoughtSpring.update(dt, 0, (vy > 0 ? vy * dt * 2 : 0));
   thought.position.set(nav.x + 0.78 * size, S.hop * size + 2.5 * size * evScale + Math.sin(t * 2) * 0.04 + tb * 0.2, nav.z + 0.2 * size);
+  if (dream.k > S.think && J.w > 0.05) { head.getWorldPosition(V1); thought.position.set(V1.x + 0.78 * size, V1.y + 0.95 * size + Math.sin(t * 2) * 0.04, V1.z + 0.2 * size); }   // sitting or lying: float it over where his head is
   thought.lookAt(camera.position);
-  cloud.opacity = S.think;
+  cloud.opacity = tk;
+  dotsMat.opacity = clamp((S.think - dream.k) * 3 + 0.5, 0, 1); dreamSp.material.opacity = clamp((dream.k - S.think) * 3, 0, 1);
   tDots.forEach((d, i) => { d.position.y = 0.03 + Math.max(0, Math.sin(t * 6 - i * 0.8)) * 0.06; });
 
   // camera shake for the big moments
