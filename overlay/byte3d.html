@@ -31,6 +31,7 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 
 // URL options:  ?cap=TEXT  ?demo=1  ?mode=stay|wander|roam|walkon  ?home=0.7,0  ?size=1  ?scale=1  ?wander=0  ?bg=#4a7fb5  ?yaw=0.6
 const params = new URLSearchParams(location.search);
@@ -370,30 +371,133 @@ mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.18, 24), M.skin, torso, [0, 0.66, 
 mesh(new THREE.CylinderGeometry(0.315, 0.30, 0.13, 48), M.jeans, torso, [0, 0.02, 0], [1, 1, 0.86]);
 mesh(new THREE.TorusGeometry(0.31, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x3b2a20, roughness: 0.6 }), torso, [0, 0.085, 0], [1, 1, 0.86], [Math.PI / 2, 0, 0]); // belt
 
+// ------------------------------------------------------------ one-piece limbs
+// Each arm and leg is ONE skinned tube from the top joint to the wrist or ankle, weighted across its three bones, so
+// the elbow or knee bends as a smooth curve instead of two capsules meeting; a sphere at the joint fills the inside
+// of the bend. Each hand is one blobby mesh (metaballs through marching cubes): palm, four fingers and thumb in one skin.
+function bone(parent, pos = [0, 0, 0]) { const b = new THREE.Bone(); b.position.set(...pos); parent.add(b); return b; }
+function limbTube(bones, profile, blends, mat, seg = 40) {
+  // profile: [[y, r], ...] from the top down (y runs negative downward, in the top bone's space); blends: [[yA, yB], [yC, yD]]:
+  // the weight slides from bone 0 to bone 1 between yA and yB, and from bone 1 to bone 2 between yC and yD
+  const pos = [], nor = [], uv = [], si = [], sw = [], idx = [];
+  const ss = (a, b, y) => { const k = clamp((a - y) / (a - b), 0, 1); return k * k * (3 - 2 * k); };
+  const n = profile.length;
+  for (let j = 0; j < n; j++) {
+    const [y, r] = profile[j];
+    const [y0, r0] = profile[Math.max(0, j - 1)], [y1, r1] = profile[Math.min(n - 1, j + 1)];
+    const dy = y1 - y0, dr = r1 - r0, nl = Math.hypot(dy, dr) || 1, nr = -dy / nl, ny = dr / nl;   // outward normal from the profile tangent
+    const w2 = ss(blends[1][0], blends[1][1], y), w1 = ss(blends[0][0], blends[0][1], y) * (1 - w2), w0 = 1 - w1 - w2;
+    for (let i = 0; i <= seg; i++) {
+      const a = i / seg * Math.PI * 2, cx = Math.cos(a), sz = Math.sin(a);
+      pos.push(cx * r, y, sz * r); nor.push(cx * nr, ny, sz * nr); uv.push(i / seg, j / (n - 1));
+      si.push(0, 1, 2, 0); sw.push(w0, w1, w2, 0);
+    }
+  }
+  for (let j = 0; j < n - 1; j++) for (let i = 0; i < seg; i++) {
+    const a = j * (seg + 1) + i, b = a + seg + 1;
+    idx.push(a, a + 1, b, a + 1, b + 1, b);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(si, 4));
+  g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(sw, 4));
+  g.setIndex(idx);
+  const sm = new THREE.SkinnedMesh(g, mat);
+  sm.castShadow = true; sm.receiveShadow = true;
+  bones[0].add(sm);
+  byte.updateMatrixWorld(true);                                    // bind in the rest pose: the bones' world matrices must be current
+  sm.bind(new THREE.Skeleton(bones));
+  return sm;
+}
+const HAND_YAW = 0.6;                              // rest hands: palm toward the thigh and a little back, thumb forward
+function handMesh(side) {
+  // metaballs in hand space (y down the arm, fingers at -y, back of the hand at +z, thumb toward -x*side), polygonised once.
+  // Four fingers and a thumb are capsules (max of a blob chain) added to the palm field; negative blobs carve the grooves; a relaxed curl.
+  const RES = 72, half = 0.22, cy = 0.02;                           // the field cube spans +-half around (0, cy, 0): fingertips to the wrist chain's top
+  const mc = new MarchingCubes(RES, M.skin, false, false, 90000);
+  mc.isolation = 0.3;
+  const K = 1 / 0.575;                                              // a blob's surface sits at 57% of its field radius at this isolation
+  const s = side;
+  const sum = [                                                     // [x, y, z, rx, ry, rz, weight]: visual radii, summed
+    [0, -0.03, 0, 0.082, 0.07, 0.046, 1],                           // palm slab
+    [-0.045 * s, -0.012, -0.004, 0.05, 0.05, 0.044, 1],             // heel of the thumb
+    [-0.038, -0.15, -0.012, 0.009, 0.05, 0.08, -0.55], [0, -0.15, -0.012, 0.009, 0.05, 0.08, -0.55], [0.038, -0.15, -0.012, 0.009, 0.05, 0.08, -0.55],   // grooves between the fingers
+  ];
+  const chains = [];                                                // each chain: max over its blobs (a capsule), then added to the sum
+  const chain = (p0, p1, r0, r1, curl, n = 13) => {
+    const c = [];
+    for (let i = 0; i < n; i++) { const t = i / (n - 1); c.push([lerp(p0[0], p1[0], t), lerp(p0[1], p1[1], t), lerp(p0[2], p1[2], t) - curl * t * t, lerp(r0, r1, t)]); }
+    chains.push(c);
+  };
+  const fx = [-0.057, -0.019, 0.019, 0.057], len = [0.088, 0.098, 0.092, 0.072];   // index, middle, ring, pinky
+  fx.forEach((x, i) => { chain([x, -0.07, 0.002], [x, -0.07 - len[i], -0.004], 0.0225, 0.019, 0.028); sum.push([x, -0.074, 0.03, 0.016, 0.016, 0.012, 0.35]); });   // finger + a soft knuckle on the back
+  chain([-0.08 * s, -0.012, -0.004], [-0.112 * s, -0.098, -0.03], 0.03, 0.021, 0.0, 13);   // thumb along the palm's edge, tip bending in
+  const wrist = [[0.17, 0.057], [0.145, 0.0615], [0.12, 0.064], [0.10, 0.0625], [0.08, 0.061], [0.06, 0.059], [0.04, 0.057], [0.02, 0.055], [0.0, 0.054]];   // [y, r]: 1-2 mm outside the forearm tube (same taper), its top tucked inside it, so there is no seam
+  const wc = [];
+  for (let i = 0; i < wrist.length - 1; i++) for (let k = 0; k < 4; k++) { const t = k / 4; wc.push([0, lerp(wrist[i][0], wrist[i + 1][0], t), 0, lerp(wrist[i][1], wrist[i + 1][1], t)]); }
+  wc.push([0, wrist.at(-1)[0], 0, wrist.at(-1)[1]]); chains.push(wc);
+  const f = mc.field, hs = mc.halfsize;
+  for (let z = 0; z < RES; z++) for (let y = 0; y < RES; y++) for (let x = 0; x < RES; x++) {
+    const px = (x / hs - 1) * half, py = (y / hs - 1) * half + cy, pz = (z / hs - 1) * half;
+    let v = 0;
+    for (const [bx, by, bz, rx, ry, rz, w] of sum) {
+      const d2 = ((px - bx) / (rx * K)) ** 2 + ((py - by) / (ry * K)) ** 2 + ((pz - bz) / (rz * K)) ** 2;
+      if (d2 < 1) { const t = 1 - d2; v += w * t * t * t; }
+    }
+    for (const c of chains) {
+      let m = 0;
+      for (const [bx, by, bz, r] of c) { const d2 = ((px - bx) ** 2 + (py - by) ** 2 + (pz - bz) ** 2) / (r * K) ** 2; if (d2 < 1) { const t = 1 - d2; m = Math.max(m, t * t * t); } }
+      v += m;
+    }
+    f[mc.size2 * z + mc.size * y + x] = v;
+  }
+  mc.update();
+  const n = mc.count, P = mc.geometry.attributes.position.array, N = mc.geometry.attributes.normal.array;
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    const x = P[i * 3] * half, y = P[i * 3 + 1] * half + cy, z = P[i * 3 + 2] * half;
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    nor[i * 3] = N[i * 3]; nor[i * 3 + 1] = N[i * 3 + 1]; nor[i * 3 + 2] = N[i * 3 + 2];
+    uv[i * 2] = Math.atan2(z, x) / (2 * Math.PI) + 0.5; uv[i * 2 + 1] = (y + 0.25) * 2;      // cylindrical uvs so the skin map shades the hand like the arm
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  g.rotateY(HAND_YAW * side);                                       // thumb swung forward: the camera sees the back of the hand at an angle, thumb in front
+  if (params.has("preview")) console.log("hand", side, n / 3, "tris");
+  return g;
+}
+const handGeo = { [-1]: handMesh(-1), [1]: handMesh(1) };
+
 // arms: shoulder + elbow pivots so they bend naturally
 const ARM_L1 = 0.30, ARM_L2 = 0.26;               // upper arm (shoulder to elbow) and forearm (elbow to wrist) lengths
 function arm(side) {                              // side: -1 = viewer's left (world -x), +1 = viewer's right
-  const sh = group(torso, [0.30 * side, 0.62, 0]);
+  const sh = bone(torso, [0.30 * side, 0.62, 0]);
   mesh(sphere, M.shirt, sh, [0, 0.0, 0], [0.125, 0.12, 0.115]);                               // sleeve cap
   mesh(new THREE.CylinderGeometry(0.095, 0.085, 0.14, 20), M.shirt, sh, [0, -0.08, 0]);      // short sleeve
-  const up = mesh(new THREE.CapsuleGeometry(0.068, ARM_L1 - 0.096, 8, 16), M.skin, sh, [0, -ARM_L1 / 2, 0]);   // upper arm
-  const el = group(sh, [0, -ARM_L1, 0]);
-  const fore = mesh(new THREE.CapsuleGeometry(0.062, ARM_L2 - 0.084, 8, 16), M.skin, el, [0, -ARM_L2 / 2, 0]);    // forearm
-  const hand = group(el, [0, -ARM_L2, 0]);
-  mesh(sphere, M.skin, hand, [0, -0.03, 0], [0.085, 0.095, 0.075]);                           // palm
-  mesh(sphere, M.skin, hand, [-0.055 * side, 0.0, 0.045], [0.034, 0.05, 0.034]);             // thumb
-  for (let i = 0; i < 3; i++) mesh(sphere, M.skin, hand, [(i - 1) * 0.045, -0.11, 0.01], [0.028, 0.035, 0.028]);  // finger bumps
+  const el = bone(sh, [0, -ARM_L1, 0]);
+  const hand = bone(el, [0, -ARM_L2, 0]);
+  mesh(sphere, M.skin, el, [0, 0, 0], [0.062, 0.062, 0.062]);                                  // elbow: fills the inside of the bend
+  limbTube([sh, el, hand],
+    [[-0.06, 0.069], [-0.15, 0.069], [-0.22, 0.067], [-0.30, 0.066], [-0.38, 0.065], [-0.44, 0.062], [-0.50, 0.057], [-0.54, 0.052], [-0.56, 0.040], [-0.575, 0.022], [-0.585, 0.008]],
+    [[-0.21, -0.39], [-0.36, -0.46]], M.skin);                                                // one tube: under the sleeve to inside the hand
+  mesh(handGeo[side], M.skin, hand);                                                       // the fused hand
   sh.rotation.z = 0.10 * side;
-  return { sh, el, hand, side, up, fore };
+  return { sh, el, hand, side };
 }
 const armN = arm(-1), armP = arm(1);              // armP holds the cigarette side
 
 function leg(side) {
-  const hp = group(hips, [0.135 * side, 0.0, 0]);
-  mesh(new THREE.CapsuleGeometry(0.1, 0.13, 8, 16), M.jeans, hp, [0, -0.12, 0]);            // thigh
-  const kn = group(hp, [0, -0.21, 0]);
-  mesh(new THREE.CapsuleGeometry(0.088, 0.13, 8, 16), M.jeans, kn, [0, -0.08, 0]);          // shin
-  const ft = group(kn, [0, -0.2, 0]);
+  const hp = bone(hips, [0.135 * side, 0.0, 0]);
+  const kn = bone(hp, [0, -0.21, 0]);
+  const ft = bone(kn, [0, -0.2, 0]);
+  mesh(sphere, M.jeans, kn, [0, 0, 0], [0.090, 0.090, 0.090]);                                 // knee
+  limbTube([hp, kn, ft],
+    [[0.02, 0.10], [-0.08, 0.10], [-0.15, 0.098], [-0.21, 0.094], [-0.28, 0.09], [-0.35, 0.086], [-0.41, 0.084], [-0.43, 0.06], [-0.44, 0.02]],
+    [[-0.12, -0.30], [-0.34, -0.41]], M.jeans);                                               // one leg: inside the hips to inside the shoe
   mesh(sphere, M.shoe, ft, [0, -0.0, 0.04], [0.115, 0.075, 0.165]);                           // sneaker body
   mesh(sphere, M.shoe, ft, [0, -0.01, 0.13], [0.1, 0.06, 0.09]);                              // toe cap
   mesh(sphere, M.shoeTrim, ft, [0, -0.025, 0.045], [0.117, 0.03, 0.167]);                     // red stripe
@@ -989,6 +1093,8 @@ const debug = {
   screenPos: () => { const v = byte.position.clone(); v.y += 1.2 * settings.size; v.project(camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; },
   teleport: (x, z) => { nav.x = x; nav.z = z; },
   hands: () => [armN, armP].map(a => { const v = new THREE.Vector3(); a.hand.getWorldPosition(v); return v.toArray().map(n => +n.toFixed(2)); }),
+  part: name => { const o = { shN: armN.sh, elN: armN.el, handN: armN.hand, shP: armP.sh, elP: armP.el, handP: armP.hand, hpN: legN.hp, knN: legN.kn, ftN: legN.ft, hpP: legP.hp, knP: legP.kn, ftP: legP.ft, head, torso }[name]; const v = new THREE.Vector3(); o.getWorldPosition(v); return v.toArray(); },   // world position of a joint, for close-up previews
+  get cam() { return camera; }, get world() { return scene; }, get renderer() { return renderer; }, get THREE() { return THREE; },
   step: (n = 60, dt = 1 / 30) => { for (let i = 0; i < n; i++) update(dt); return { x: +nav.x.toFixed(2), z: +nav.z.toFixed(2), yaw: +nav.yaw.toFixed(2), moving: +nav.moving.toFixed(2), off: nav.offscreen, mode: currentMode() }; },
   get J() { return J; }, get bulb() { return [bulbAt, thinkStart, S.think, thinkStyle]; }, get cigOn() { return cig.visible; }, itemInfo: k => { const r = ITEMS[k]?.root; return r && { vis: r.visible, pos: r.position.toArray().map(v => +v.toFixed(2)), s: +r.scale.x.toFixed(2), parent: r.parent?.type }; },
   scene: name => applySettings({ acts: { scene: name } }), event: (name, info = {}) => doActivity(name, info), get items() { return Object.keys(ITEMS); }, get fx() { return Object.keys(FX); },
@@ -1043,7 +1149,7 @@ const clock = new THREE.Clock();
 
 // arm poses: shoulder quaternion + elbow bend. Static poses from Euler angles, reach poses from two-bone IK.
 // the arm's rest geometry as the model built it, read once before the first stretch: joint and mesh offsets, and the bone lengths (L1 shoulder to elbow, L2 elbow to hand)
-function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, up: arm.up.position.y, fore: arm.fore.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
+function armRest(arm) { return arm.rest ??= { el: arm.el.position.y, hand: arm.hand.position.y, L1: -arm.el.position.y, L2: -arm.hand.position.y }; }
 const eulerPose = (sx, sy, sz, ex) => ({ q: new THREE.Quaternion().setFromEuler(new THREE.Euler(sx, sy, sz)), ex });
 const POSE = {
   rest: s => eulerPose(0.0, 0, 0.10 * s, -0.5),           // arms hang by his sides, elbows a little bent, hands in front of the hips: not a starfish
@@ -1090,7 +1196,7 @@ function applyArm(arm, p, dt, rate = 7) {
   arm.el.rotation.x = u.p.ex;
   const k = u.p.k ?? 1;                                       // stretch the arm along its length
   const R = armRest(arm);                                     // offsets come from the built model, so bone changes made there carry through
-  arm.el.position.y = R.el * k; arm.up.position.y = R.up * k; arm.up.scale.y = k; arm.fore.position.y = R.fore * k; arm.fore.scale.y = k; arm.hand.position.y = R.hand * k;
+  arm.el.position.y = R.el * k; arm.hand.position.y = R.hand * k;                        // the skinned tube stretches between the bones
   keepArmOut(arm, k, p.reach);
 }
 // keep the arm outside his belly: swing the shoulder out until the upper arm, elbow, forearm and hand clear the body
