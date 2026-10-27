@@ -89,7 +89,15 @@
       <button class="ghost mode" data-mode="roam">Free roam</button>
       <button class="ghost mode" data-mode="walkon">Walk on to talk</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:8px">Stay put: stands still. Wander: paces around his spot. Free roam: walks the whole screen, near and far. Walk on: hidden until he has something to say.</div>
+    <div class="row" style="margin-top:8px">
+      <button class="ghost mode" data-mode="bottom">Bottom strip</button>
+      <button class="ghost mode" data-mode="top">Top strip</button>
+      <button class="ghost mode" data-mode="left">Left side</button>
+      <button class="ghost mode" data-mode="right">Right side</button>
+      <button class="ghost mode" data-mode="cornerl">Bottom-left corner</button>
+      <button class="ghost mode" data-mode="cornerr">Bottom-right corner</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Stay put: stands still. Wander: paces around his spot. Free roam: walks the whole screen, near and far. Walk on: hidden until he has something to say. Screen layouts (second row): he walks around but only in that part of the screen, a bit smaller, and skips the prop activities.</div>
     <div class="row" style="margin-top:10px">
       <label style="display:flex;align-items:center;gap:8px;margin:0">Home spot <select id="home"><option value="-0.7">Left (-0.7)</option><option value="0">Center (0)</option><option value="0.7">Right (0.7)</option></select></label>
       <label style="display:flex;align-items:center;gap:8px;margin:0">Size <input type="range" id="size" min="0.5" max="1.6" step="0.05" value="1"> <span id="sizeVal">1.0×</span></label>

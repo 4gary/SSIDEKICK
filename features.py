@@ -560,7 +560,10 @@ class Features:
                 self.away.update(mode=self.sk.avatar["mode"], set="wander")
                 await self.set_avatar({"mode": "wander"})
         self.away["next"] = time.monotonic() + 100
-        name = random.choice(self.cfg["quiet"].get("away_activities") or ["phone"])
+        names = self.cfg["quiet"].get("away_activities") or ["phone"]
+        if self.sk.avatar.get("mode") in self.LAYOUT_MODES:      # a screen layout stays put for the break: only the no-prop activities
+            names = [n for n in names if n in ("phone", "read", "snack", "floorsit", "lieback")] or ["phone"]
+        name = random.choice(names)
         await self.sk.send_overlays({"type": "avatar", "set": {"do": {"name": name, "at": int(time.time() * 1000)}}})
         log.info("Away activity: %s", name)
 
@@ -921,12 +924,45 @@ class Features:
 
     # ------------------------------------------------------------ where the 3D Gary goes
 
+    # screen layouts: he walks around but only in one part of the screen. Corners come first, so "bottom left corner" isn't the bottom strip.
+    # A layout needs a layout word ("bottom strip", "left side mode"), a going word with a place ("walk along the bottom",
+    # "go to the left side") or the bare name ("Gary, left side"), so game talk like "what's in the top left corner",
+    # "keep that in the back of your mind" or "should I go left or right" doesn't switch it. "Stay at the bottom" stays stay put.
+    LAYOUTS = [
+        ("cornerl", r"(?<!top )(?<!top-)(?:(?:bottom|lower)[- ]?)?left corner"),
+        ("cornerr", r"(?<!top )(?<!top-)(?:(?:bottom|lower)[- ]?)?right corner"),
+        ("bottom", r"bottom(?: of the screen)?"),
+        ("top", r"(?:top|back)(?: of the screen)?"),
+        ("left", r"left (?:side|edge)|left of the screen"),
+        ("right", r"right (?:side|edge)|right of the screen"),
+    ]
+    LAYOUT_MODES = {m for m, _ in LAYOUTS}
+
+    def layout_command(self, c):
+        """The screen layout c asks for, or None."""
+        c = c.strip(" .!?,")
+        if re.search(r"\btop[- ]?(left|right) corner\b", c):      # no top corners: that's game talk, not the top strip
+            return None
+        for mode, area in self.LAYOUTS:
+            if (re.search(rf"\b(?:{area}) (strip|mode|layout|column)\b", c)
+                    or re.fullmatch(rf"(?:(?:go|switch) )?(?:to )?(?:the )?(?:{area})(?: please)?", c)
+                    or re.search(rf"\b(walk|move|stick|pace|hang out|go|head|switch) (along|across|to|over to|into|in|on) the (?:{area})\b(?! of (?!the screen))", c)
+                    or re.search(rf"\b(walk|move|pace|hang out) (along|across|at|on) the (?:{area})\b", c)
+                    or (mode in ("bottom", "top") and re.search(rf"\bonly (?:be |being |stay |walk |go )?(?:at|on|along) the {area}\b", c))
+                    or (mode.startswith("corner") and re.search(rf"\b(go|head|move|get|hang|sit|stay|live)\b[^.?!]{{0,25}}\b(?:{area})\b", c))):
+                return mode
+        return None
+
     async def move_command(self, c):
-        """"Gary, stay at the bottom" / "stay put on the left" / "free roam" / "wander around" / "walk on"."""
+        """"Gary, stay at the bottom" / "stay put on the left" / "free roam" / "wander around" / "walk on" / "bottom strip"."""
         av = self.sk.avatar
         home = dict(av.get("home") or {"x": 0.72, "z": 0})
         change = {}
-        if re.search(r"\b(stay (put|still|stationary|in place)|stay (at|on|in) the (bottom|top|left|right|middle|centre|"
+        layout = None if re.search(r"\b(stay (put|still|stationary|in place)|hold still|don'?t move|stand still|sit still)\b", c) \
+            else self.layout_command(c)
+        if layout:
+            change["mode"] = layout
+        elif re.search(r"\b(stay (put|still|stationary|in place)|stay (at|on|in) the (bottom|top|left|right|middle|centre|"
                      r"center|back|front)|hold still|don'?t move|"
                      r"stop (moving|walking|roaming|wandering)|park (it|yourself)|sit still|stand still|stationary)\b", c):
             change["mode"] = "stay"
@@ -960,7 +996,13 @@ class Features:
         self.say(random.choice({"stay": ["Staying put.", "Parking it right here.", "Not moving an inch."],
                                 "roam": ["Free roam, here I go.", "Time to stretch my legs."],
                                 "wander": ["I'll just pace around over here."],
-                                "walkon": ["I'll stay hidden until I've got something to say."]}[change["mode"]]))
+                                "walkon": ["I'll stay hidden until I've got something to say."],
+                                "bottom": ["Down here along the bottom. Mind your feet.", "Bottom strip, keeping out of the way."],
+                                "top": ["Up top, way in the back.", "Heading to the back row."],
+                                "left": ["Left side's mine now.", "Sticking to the left."],
+                                "right": ["Right side's mine now.", "Sticking to the right."],
+                                "cornerl": ["Little corner office, bottom left.", "Tucked in the corner."],
+                                "cornerr": ["Little corner office, bottom right.", "Tucked in the corner."]}[change["mode"]]))
         return True
 
     # ------------------------------------------------------------ voice effects

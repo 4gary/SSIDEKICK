@@ -23,6 +23,21 @@ You can also switch these and turn single activities on/off on the control page
 (http://localhost:7777/control, card "What the 3D sidekick does on his own").
 
 
+SCREEN LAYOUTS (he keeps walking around, but only in one part of the screen)
+------------------------------------------------------------------------------
+  "Gary, bottom strip"  /  "Gary, walk along the bottom"  /  "Gary, only go at the bottom"
+                                    small, walks left and right along the bottom edge
+  "Gary, top strip"  /  "Gary, head to the back"        small line way in the back, near the top
+  "Gary, left side"  /  "Gary, stick to the left side"  /  same with right
+                                    a column down that side, walking front and back
+  "Gary, go to the bottom left corner"  /  "Gary, right corner mode"
+                                    a small patch in that bottom corner
+Back to normal with "Gary, free roam" / "wander around" / "stay put" / "walk on mode".
+In a layout he's drawn smaller (the Size slider still scales him on top of that), skips the
+prop activities (DJ deck, couch, bed...) so the screen stays clear, and stops where he is to talk.
+"Stay at the bottom" is still stay put (standing still, close to the camera).
+Buttons for all six are in the OBS dock (Movement card) and on the control page.
+
 QUIET / PAUSE
 -------------
   "Gary, hold that thought" / "hang on" / "wait" / "stop" / "stop it"   cuts him off mid-line
